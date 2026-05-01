@@ -13,4 +13,6 @@
 
 ## 迭代 SPEC 边界
 
-（尚未创建迭代 SPEC，由 `/spec` 命令在首个迭代创建后追加条目）
+| 迭代 | 文档 | 边界摘要 |
+|------|------|---------|
+| 1 | [Iteration1_MVP_Core_Link_SPEC.md](./Iteration1_MVP_Core_Link_SPEC.md) | 只做 PAT 录入（ESP 加密） + SAF 单目录授权（含 canRead/canWrite 探测） + 手动 Clone/Pull(仅无冲突场景)/Commit/Push 端到端验证；不做 WorkManager 自动同步、目录树/Diff UI、冲突分级/解决、SSH、多仓、JGit 自定义 FS 适配。 |

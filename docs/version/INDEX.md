@@ -4,3 +4,11 @@
 
 | 迭代 | 标题 | 状态 | 文档 | 创建日期 |
 |------|------|------|------|---------|
+| 1 | MVP 核心链路 | ✅ 评审完成（待开发） | [Iteration1_MVP_Core_Link_SPEC.md](./Iteration1_MVP_Core_Link_SPEC.md) | 2026-05-01 |
+
+## 变更记录
+
+| 日期 | 版本 | 变更人 | 变更说明 |
+|---|---|---|---|
+| 2026-05-01 | v1.0 | alexjhwen | 新增迭代 1：MVP 核心链路（PAT + SAF + JGit 手动链路）。 |
+| 2026-05-01 | v1.1 | alexjhwen | 迭代 1 Spec 完成评审修订，状态流转为"评审完成（待开发）"；评审报告见 `docs/version/review/Iteration1_MVP_Core_Link_REVIEW.md`。 |
