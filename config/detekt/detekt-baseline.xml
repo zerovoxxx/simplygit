@@ -1,0 +1,32 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues></ManuallySuppressedIssues>
+  <CurrentIssues>
+    <ID>BlockCommentInitialStarAlignment:Theme.kt$/* Other default colors to override background = Color(0xFFFFFBFE), surface = Color(0xFFFFFBFE), onPrimary = Color.White, onSecondary = Color.White, onTertiary = Color.White, onBackground = Color(0xFF1C1B1F), onSurface = Color(0xFF1C1B1F), */</ID>
+    <ID>BlockCommentInitialStarAlignment:Type.kt$/* Other default text styles to override titleLarge = TextStyle( fontFamily = FontFamily.Default, fontWeight = FontWeight.Normal, fontSize = 22.sp, lineHeight = 28.sp, letterSpacing = 0.sp ), labelSmall = TextStyle( fontFamily = FontFamily.Default, fontWeight = FontWeight.Medium, fontSize = 11.sp, lineHeight = 16.sp, letterSpacing = 0.5.sp ) */</ID>
+    <ID>CommentWrapping:DiagnosticsLogger.kt$DiagnosticsLogger$/* append = */</ID>
+    <ID>FinalNewline:Color.kt$com.example.simplygit.ui.theme.Color.kt</ID>
+    <ID>FinalNewline:ExampleUnitTest.kt$com.example.simplygit.ExampleUnitTest.kt</ID>
+    <ID>FinalNewline:Theme.kt$com.example.simplygit.ui.theme.Theme.kt</ID>
+    <ID>FinalNewline:Type.kt$com.example.simplygit.ui.theme.Type.kt</ID>
+    <ID>FunctionNaming:ExampleUnitTest.kt$ExampleUnitTest$@Test fun addition_isCorrect()</ID>
+    <ID>ImportOrdering:ExampleUnitTest.kt$import org.junit.Test import org.junit.Assert.*</ID>
+    <ID>MultiLineIfElse:HomeScreen.kt$stringResource(R.string.credential_bound, username)</ID>
+    <ID>MultiLineIfElse:HomeScreen.kt$stringResource(R.string.credential_missing)</ID>
+    <ID>MultiLineIfElse:HomeScreen.kt$stringResource(R.string.remote_bound, currentUrl)</ID>
+    <ID>MultiLineIfElse:HomeScreen.kt$stringResource(R.string.remote_missing)</ID>
+    <ID>MultiLineIfElse:HomeScreen.kt$stringResource(R.string.vault_bound, currentAbsPath)</ID>
+    <ID>MultiLineIfElse:HomeScreen.kt$stringResource(R.string.vault_missing)</ID>
+    <ID>MultiLineIfElse:RepoBindingRepositoryImpl.kt$RepoBindingRepositoryImpl$RepoBinding(uri, abs, url)</ID>
+    <ID>MultiLineIfElse:RepoBindingRepositoryImpl.kt$RepoBindingRepositoryImpl$null</ID>
+    <ID>NewLineAtEndOfFile:Color.kt$com.example.simplygit.ui.theme.Color.kt</ID>
+    <ID>NewLineAtEndOfFile:ExampleUnitTest.kt$com.example.simplygit.ExampleUnitTest.kt</ID>
+    <ID>NewLineAtEndOfFile:Theme.kt$com.example.simplygit.ui.theme.Theme.kt</ID>
+    <ID>NewLineAtEndOfFile:Type.kt$com.example.simplygit.ui.theme.Type.kt</ID>
+    <ID>NoUnusedImports:HomeViewModel.kt$com.example.simplygit.ui.home.HomeViewModel.kt</ID>
+    <ID>NoUnusedImports:Theme.kt$com.example.simplygit.ui.theme.Theme.kt</ID>
+    <ID>NoWildcardImports:ExampleUnitTest.kt$import org.junit.Assert.*</ID>
+    <ID>TooManyFunctions:HomeViewModel.kt$HomeViewModel : ViewModel</ID>
+    <ID>WildcardImport:ExampleUnitTest.kt$import org.junit.Assert.*</ID>
+  </CurrentIssues>
+</SmellBaseline>

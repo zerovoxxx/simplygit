@@ -1,3 +1,57 @@
 <resources>
     <string name="app_name">simplygit</string>
+
+    <!-- Home screen — sections -->
+    <string name="home_title">SimplyGit</string>
+    <string name="section_credential">凭证 (GitHub PAT)</string>
+    <string name="section_vault">本地 Vault 目录</string>
+    <string name="section_remote">远程仓库</string>
+    <string name="section_ops">Git 操作</string>
+    <string name="section_log">状态</string>
+
+    <!-- Credential -->
+    <string name="label_username">用户名</string>
+    <string name="label_email">邮箱</string>
+    <string name="label_pat">Personal Access Token</string>
+    <string name="hint_email_default">留空则使用 %1$s@users.noreply.github.com</string>
+    <string name="action_save_credential">保存凭证</string>
+    <string name="action_clear_clipboard">清空剪贴板</string>
+    <string name="credential_bound">已绑定 @%1$s</string>
+    <string name="credential_missing">未绑定凭证</string>
+
+    <!-- Vault -->
+    <string name="action_pick_vault">选择 Vault 目录</string>
+    <string name="vault_bound">已绑定目录：%1$s</string>
+    <string name="vault_not_primary">该目录所在存储分区不被 JGit 直连支持，请选择内置存储 /sdcard/Documents 下的目录</string>
+    <string name="vault_not_readable">该目录当前无读写权限（可能位于 Android/data 等受限位置），请选择内置存储 Documents 下的目录</string>
+    <string name="vault_missing">未绑定 Vault 目录</string>
+
+    <!-- Remote -->
+    <string name="label_remote_url">远程仓库 URL (HTTPS)</string>
+    <string name="action_save_remote">保存远程地址</string>
+    <string name="remote_bound">远程：%1$s</string>
+    <string name="remote_missing">未配置远程地址</string>
+
+    <!-- Git operations -->
+    <string name="action_clone">Clone</string>
+    <string name="action_pull">Pull</string>
+    <string name="action_commit">Commit</string>
+    <string name="action_push">Push</string>
+    <string name="label_commit_message">Commit 信息</string>
+
+    <!-- Status -->
+    <string name="status_idle">空闲</string>
+    <string name="status_working">正在执行 %1$s…</string>
+    <string name="status_error">操作失败：%1$s — %2$s</string>
+    <string name="status_success_clone">Clone 成功</string>
+    <string name="status_success_pull">Pull 成功：%1$s</string>
+    <string name="status_success_commit">Commit 成功</string>
+    <string name="status_success_push">Push 成功</string>
+    <!-- SPEC §5.2 / A8: Pull 成功日志核心文案。 -->
+    <string name="status_pulled_commits">pulled %1$d commits</string>
+    <string name="status_pulled_commits_with_status">pulled %1$d commits (%2$s)</string>
+    <string name="action_dismiss_error">关闭错误</string>
+    <string name="error_saf_permission_revoked">Vault 目录的读写权限已被系统回收，请重新选择目录</string>
+    <string name="error_missing_credential">尚未保存 GitHub 凭证</string>
+    <string name="error_binding_missing">尚未完成仓库绑定（凭证 / 目录 / 远程 URL）</string>
 </resources>

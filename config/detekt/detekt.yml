@@ -1,0 +1,84 @@
+# SPEC NF5 — first-time detekt config for Iteration 1.
+# We deliberately keep the ruleset minimal: only high-signal rules that guard
+# against regressions on the golden rules captured in docs/retro/golden-rules.md.
+# New rules can be tightened per iteration; legacy findings are suppressed via
+# detekt-baseline.xml until they can be paid off.
+
+build:
+  maxIssues: 0
+  excludeCorrectable: false
+
+config:
+  validation: true
+  warningsAsErrors: false
+
+processors:
+  active: true
+
+console-reports:
+  active: true
+
+complexity:
+  active: true
+  LongMethod:
+    active: true
+    threshold: 80
+  LongParameterList:
+    active: true
+    functionThreshold: 8
+    constructorThreshold: 10
+  CyclomaticComplexMethod:
+    active: true
+    threshold: 20
+
+empty-blocks:
+  active: true
+
+exceptions:
+  active: true
+  TooGenericExceptionCaught:
+    active: false   # We intentionally catch Throwable in sanitizer paths.
+
+naming:
+  active: true
+  FunctionNaming:
+    active: true
+    functionPattern: '[a-z][a-zA-Z0-9]*'
+    excludes:
+      - "**/ui/**"   # @Composable functions follow PascalCase.
+
+performance:
+  active: true
+
+potential-bugs:
+  active: true
+  UnsafeCast:
+    active: true
+
+style:
+  active: true
+  MagicNumber:
+    active: false   # Too noisy for UI dp/padding constants in Iteration 1.
+  MaxLineLength:
+    active: true
+    maxLineLength: 140
+  NewLineAtEndOfFile:
+    active: true
+  UnusedPrivateMember:
+    active: true
+  ReturnCount:
+    active: false
+  WildcardImport:
+    active: true
+
+formatting:
+  active: true
+  android: true
+  autoCorrect: false
+  MaximumLineLength:
+    active: true
+    maxLineLength: 140
+  NoWildcardImports:
+    active: true
+  FinalNewline:
+    active: true

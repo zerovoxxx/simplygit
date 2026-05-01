@@ -1,6 +1,6 @@
 # 迭代 1 Spec：MVP 核心链路
 
-> **文档状态: 评审完成**
+> **文档状态: CR中**
 
 ## 1. 文档信息
 
@@ -743,3 +743,5 @@ interface RepoBindingRepository {
 |---|---|---|---|
 | 2026-05-01 | v1.0 | alexjhwen | 初版：PAT 授权 + SAF 授权 + JGit Clone/Commit/Push 端到端手动链路；确立四层架构骨架、EncryptedSharedPrefs 凭证方案、SAF 绝对路径直连策略。 |
 | 2026-05-01 | v1.1 | alexjhwen | 评审修订（见 `docs/version/review/Iteration1_MVP_Core_Link_REVIEW.md`）：①纳入 G7 Pull（对齐总方案 §9 P1.5）；②`Credential` 改为非 data class + `CharArray` + 手写 `toString=redacted`（R3 / 总方案 §5.1）；③新增 §4.1.1 依赖清单与 §4.1.2 Manifest 清单（R4 / R5），补 `INTERNET` 权限与 desugar 双配置；④包名基线统一为 `com.example.simplygit`，`targetSdk` 沿用 36；⑤PAT 存储方案命名统一为 ESP，§3.1.2 术语对齐；⑥SAF 解析返回 `ResolveResult` 三态，加入 `canRead/canWrite` 探测（总方案 §4.1）；⑦新增 `JGitExceptionSanitizer` 异常脱敏层 + R-6 / R-7；⑧`MainActivity` 启用 `FLAG_SECURE` + 剪贴板 60s 清空（总方案 §5.3 / §5.4）；⑨验收标准可操作化（`run-as` + `git log --format`），新增 A8-A10 覆盖 Pull / 剪贴板 / 异常脱敏；⑩为 `PersonIdent.email` 追加 `github_email` 持久化字段与跨层传递路径。 |
+| 2026-05-01 | v1.2 | alexjhwen | 开发落地（`/dev`）：按 §4 Phase 1-5 完成工程基线 / Data 层 / Domain 层 / UI 层的代码实现；`./gradlew :app:compileDebugKotlin` 与 `:app:lintDebug` 均通过（NF4）。实施中的偏差：①`ClipboardManager.clearPrimaryClip` 要求 API 28，minSdk=26 场景下增加 `clearClipboardCompat` 兜底（API<28 用空剪贴板覆盖，对齐 §4.6 预期行为）；②`RepoBindingRepository.clear` 接口新增一条 `clear()` 方法以配合未来 Reset 流程（不影响本迭代验收）。功能验收（A1-A10）与 NF1-NF3/NF5-NF6 需真机/手动执行。 |
+| 2026-05-01 | v1.3 | alexjhwen | CR 修复（`/code_review`）：①【M-1】新增 `GitOpPreflight`，所有 PAT-using UseCase（Clone/Pull/Commit/Push）在执行前调用 `SafPathResolver.hasPersistedPermission`，权限回收时返回 `SafPermissionRevokedException`（§4.3 落地）；②【M-2】剪贴板 60s 自动清空移至 `HomeViewModel.viewModelScope`，脱离 Composable 生命周期；③【M-3】Pull 文案改走 `R.string.status_pulled_commits[_with_status]`，ViewModel 只产出 `"<count>\|<status>"` 结构化 payload，UI 层负责本地化，消除"pull ok: N commits"中英混排与未使用资源；④【M-4】`HomeUiState.Error` 增加 `DismissError` Intent + UI "关闭错误"按钮，Error 不再永久卡住 binding/cred 投影；⑤【M-5】新增 `config/detekt/detekt.yml` + `detekt-baseline.xml`，`./gradlew :app:detekt` 通过；⑥【M-6】新增 `DiagnosticsLogger`（`filesDir/logs/diagnostics.log`），只落 sanitized message + `SanitizedGitException.originalType`，A10 可按类型名定位；⑦【L-1】`JGitExceptionSanitizer.sanitize` 递归遍历 cause 链；⑧【L-2】新增 `ErrorKind` sealed interface，UI 所有错误文案走 strings.xml，`MissingCredential/MissingBinding/SafPermissionRevoked` 有专属本地化；⑨【L-3】`MasterKey` 构造增加 `runCatching { Builder } .recover { MasterKeys.getOrCreate }` 降级路径（R-2 落地）；⑩【L-5】DataStore 文件名改为 `repo` → `repo.preferences_pb`（对齐 §6.1 表）；⑪【L-6】`HomeViewModel.credentialView: StateFlow<CredentialPublicView?>`，"已绑定 @username" 在 Working/Error 态下仍显示。编译 / lint / detekt 全绿。 |
