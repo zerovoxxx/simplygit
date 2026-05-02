@@ -1,0 +1,175 @@
+@file:Suppress("LongParameterList", "TooManyFunctions")
+
+package com.example.simplygit.data.sync
+
+import androidx.room.withTransaction
+import com.example.simplygit.domain.model.ConflictClass
+import com.example.simplygit.domain.model.RepositoryStateSnapshot
+import com.example.simplygit.domain.model.SyncLogModel
+import com.example.simplygit.domain.model.SyncResult
+import com.example.simplygit.domain.model.SyncState
+import com.example.simplygit.domain.model.SyncTrigger
+import com.example.simplygit.domain.repository.SyncLogRepository
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import java.time.Duration
+import java.time.Instant
+import javax.inject.Inject
+import javax.inject.Singleton
+
+/**
+ * Room-backed [SyncLogRepository] (SPEC §4.3 / §4.6 / §6.1 Iteration 2).
+ *
+ * Transaction boundaries follow SPEC §4.3:
+ *  - `startLog` is a standalone INSERT (we do not hold a transaction open
+ *    across a multi-second Git run).
+ *  - `finishLog` / `updateSyncState` / `pauseAndFinish` combine the log
+ *    completion and the repository state transition in one
+ *    [androidx.room.withTransaction] block so they cannot drift apart.
+ */
+@Singleton
+class SyncLogRepositoryImpl @Inject constructor(
+    private val db: SimplygitDatabase,
+    private val logDao: SyncLogDao,
+    private val repoDao: RepositoryDao,
+) : SyncLogRepository {
+
+    override fun observeRecent(limit: Int): Flow<List<SyncLogModel>> =
+        logDao.observeRecentAll(limit).map { rows -> rows.map { it.toModel() } }
+
+    override fun observeRepoState(repoId: Long): Flow<RepositoryStateSnapshot> =
+        repoDao.observeFirst().map { entity -> entity.toStateSnapshot(repoId) }
+
+    override suspend fun loadById(id: Long): SyncLogModel? =
+        logDao.findById(id)?.toModel()
+
+    override suspend fun loadRepoState(repoId: Long): RepositoryStateSnapshot =
+        repoDao.findById(repoId).toStateSnapshot(repoId)
+
+    override suspend fun startLog(repoId: Long, trigger: SyncTrigger, now: Instant): Long =
+        logDao.insert(
+            SyncLogEntity(
+                repoId = repoId,
+                startedAt = now.toEpochMilli(),
+                endedAt = null,
+                trigger = trigger.name,
+                result = null,
+            ),
+        )
+
+    override suspend fun finishLog(
+        logId: Long,
+        result: SyncResult,
+        endedAt: Instant,
+        commitsPulled: Int,
+        commitsPushed: Int,
+        filesChanged: Int,
+        conflictClass: ConflictClass?,
+        errorMsg: String?,
+        errorType: String?,
+    ) {
+        db.withTransaction {
+            val row = logDao.findById(logId) ?: return@withTransaction
+            logDao.update(
+                row.copy(
+                    endedAt = endedAt.toEpochMilli(),
+                    result = result.name,
+                    commitsPulled = commitsPulled,
+                    commitsPushed = commitsPushed,
+                    filesChanged = filesChanged,
+                    conflictClass = conflictClass?.name,
+                    errorMsg = errorMsg,
+                    errorType = errorType,
+                ),
+            )
+            repoDao.updateLastSync(row.repoId, endedAt.toEpochMilli(), result.name)
+        }
+    }
+
+    override suspend fun updateSyncState(repoId: Long, state: SyncState) {
+        repoDao.updateSyncState(repoId, state.name)
+    }
+
+    override suspend fun pauseAndFinish(
+        repoId: Long,
+        logId: Long,
+        state: SyncState,
+        result: SyncResult,
+        endedAt: Instant,
+        conflictClass: ConflictClass?,
+        errorMsg: String?,
+        errorType: String?,
+    ) {
+        db.withTransaction {
+            val row = logDao.findById(logId)
+            if (row != null) {
+                logDao.update(
+                    row.copy(
+                        endedAt = endedAt.toEpochMilli(),
+                        result = result.name,
+                        conflictClass = conflictClass?.name,
+                        errorMsg = errorMsg,
+                        errorType = errorType,
+                    ),
+                )
+                repoDao.updateLastSync(row.repoId, endedAt.toEpochMilli(), result.name)
+            }
+            repoDao.updateSyncState(repoId, state.name)
+        }
+    }
+
+    override suspend fun recentConsecutiveFailures(repoId: Long): Int {
+        val recent = logDao.recentFinishedResults(repoId = repoId, scanLimit = FAILURE_SCAN_LIMIT)
+            .mapNotNull { name -> runCatching { SyncResult.valueOf(name) }.getOrNull() }
+            .filter { it != SyncResult.SKIPPED_DEBOUNCE && it != SyncResult.SKIPPED_PAUSED }
+        return recent.takeWhile { it != SyncResult.OK }.count()
+    }
+
+    override suspend fun pruneExpired(now: Instant) {
+        val cutoff = now.minus(Duration.ofDays(RETENTION_DAYS.toLong())).toEpochMilli()
+        logDao.pruneExpired(cutoffMillis = cutoff, maxRows = MAX_ROWS)
+    }
+
+    override suspend fun loadRecentForExport(limit: Int): List<SyncLogModel> =
+        logDao.recentAll(limit).map { it.toModel() }
+
+    private companion object {
+        const val FAILURE_SCAN_LIMIT = 10
+        const val RETENTION_DAYS = 7
+        const val MAX_ROWS = 500
+    }
+}
+
+internal fun SyncLogEntity.toModel(): SyncLogModel = SyncLogModel(
+    id = id,
+    repoId = repoId,
+    startedAt = Instant.ofEpochMilli(startedAt),
+    endedAt = endedAt?.let { Instant.ofEpochMilli(it) },
+    trigger = runCatching { SyncTrigger.valueOf(trigger) }.getOrDefault(SyncTrigger.PERIODIC),
+    result = result?.let { runCatching { SyncResult.valueOf(it) }.getOrNull() },
+    commitsPulled = commitsPulled,
+    commitsPushed = commitsPushed,
+    filesChanged = filesChanged,
+    conflictClass = conflictClass?.let { runCatching { ConflictClass.valueOf(it) }.getOrNull() },
+    errorMsg = errorMsg,
+    errorType = errorType,
+)
+
+internal fun RepositoryEntity?.toStateSnapshot(repoId: Long): RepositoryStateSnapshot {
+    if (this == null) {
+        return RepositoryStateSnapshot(
+            repoId = repoId,
+            syncState = SyncState.IDLE,
+            lastSyncAt = null,
+            lastSyncResult = null,
+        )
+    }
+    val state = runCatching { SyncState.valueOf(syncState) }.getOrDefault(SyncState.IDLE)
+    val result = lastSyncResult?.let { runCatching { SyncResult.valueOf(it) }.getOrNull() }
+    return RepositoryStateSnapshot(
+        repoId = id,
+        syncState = state,
+        lastSyncAt = lastSyncAt?.let { Instant.ofEpochMilli(it) },
+        lastSyncResult = result,
+    )
+}

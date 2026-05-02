@@ -1,6 +1,24 @@
 # 迭代 2 Spec：自动化静默同步
 
-> **文档状态: 评审完成**
+> **文档状态: 已完成**
+>
+> **开发进度（2026-05-02 实施快照）**：
+> - G1 周期调度 — ✅ 已完成（`runtime/GitSyncWorker.kt` + `SyncSchedulerImpl.kt` + `WorkTags`；`SimplyGitApp` 实现 `Configuration.Provider` 注入 `HiltWorkerFactory`）
+> - G2 策略配置 — ✅ 已完成（`SyncPolicyRepository` Room 后端 + `UpdateSyncPolicyUseCase` + `SyncPolicyScreen`；`ExistingPeriodicWorkPolicy.UPDATE` 保证下周期生效）
+> - G3 防抖 + 空 commit 抑制 — ✅ 已完成（`DebounceGuard.withinQuietWindow` + `GitRepository.commitAllIfDirty` 返回 nullable）
+> - G4 冲突分类 — ✅ 已完成（`data/git/ConflictClassifier.kt` 下沉 Data 层，`internal class`；六种 `ConflictClass` 映射；二进制兜底走 `attributesNodeProvider` + 前 8KB NUL 扫描；仅在 `Git.use{}` 作用域内被调用）
+> - G5 Room 审计 — ✅ 已完成（`SyncLogEntity` + `SyncLogDao.pruneExpired(500 rows / 7 days)` + `SyncAuditScreen` + `SyncAuditDetailScreen`；v1→v2 Migration 新增 `sync_log.errorType`，Audit Detail 页展示原始异常类型）
+> - G6 通知分级 — ✅ 已完成（`NotificationChannels` 双通道 + `NotificationPublisherImpl` + 首页 badge；`POST_NOTIFICATIONS` 运行时申请在首次 Save 触发）
+> - G7 失败降级矩阵 + 恢复同步 — ✅ 已完成（`SyncState` 四态 + `PAUSED_STATES` 短路 + `ResumeFromPauseUseCase` + Banner 二次确认；BROKEN 状态同时显示"查看日志"与"恢复同步"两个按钮）
+> - G8 catch-up — ✅ 已完成（`CatchUpTrigger.triggerIfStale`，阈值 `interval * 2`；`MainActivity.onCreate` 异步触发）
+> - G9 日志导出 — ✅ 已完成（`ExportLogsUseCase` 打包 sync_log.json + `diagnostics-YYYY-MM-DD.log` → `filesDir/exports/*.zip` → `FileProvider` + `ACTION_SEND`；二次确认弹窗）
+> - G10 NFR — ⏳ 待真机手测（日均耗电 / 同步成功率 / 通知触达率）；编译链路 `assembleDebug` / `lintDebug` / `detekt` 均通过
+>
+> **P0/P1/P2 闭环**：I-1（SyncErrorKind + classifyKind）、I-2（`currentOrNull` / `snapshotIdentity` / `pullAndClassify` / `commitAllIfDirty`）、I-3（`ConflictClassifier` 下沉到 `data/git/`，`internal class`，返回 `PullOutcomeClassified` 纯数据 DTO）、I-4（`DiagnosticsLogger` 按日滚动 + `snapshotRecentLogFiles`）、I-5（`RepositoryEntity.syncPolicyId` `@ForeignKey RESTRICT` + `Index`）、I-7（Home 四手动按钮独立于状态机，代码注释已标注）、I-8（DataStore→Room 迁移在 `RepoBindingRepositoryImpl.migrateFromDataStoreIfNeeded`，`SafUriStore` 标 `@Deprecated`）均已落地。
+>
+> **CR 修订闭环（2026-05-02 第二轮）**：CR-P2-01（`SimplyGitApp.onCreate` 显式异步挂接迁移 + `migration_v1_done` / `migration_v1_retry_count` 双标记，3 次失败降级为 UI 重绑提示 + `isMigrationDisabled`）、CR-P2-02（迁移成功下轮启动 `clearLegacyBindingKeys`）、CR-P2-03（`ConflictClassifier` 改 `internal class`）、CR-P2-05（`SyncLogRepository.observeRepoState` KDoc 明确 N4 单仓下忽略 `repoId`）、CR-P2-06（Spec §4.3 明确 `Unknown` 走 `Result.success` 不 backoff，注释补齐）、CR-P3-01（`BROKEN` 状态 Banner 同时提供"查看日志"+"恢复同步"）、CR-P3-02（`SyncLogEntity.errorType` 新增字段 + Room Migration(1,2) + Audit Detail 页展示）均已落地。
+>
+> **架构边界 A11d 静态检查结果**：`grep -rE "import org\.eclipse\.jgit" app/src/main/java/com/example/simplygit/{domain,ui}/` 零命中；`grep -rE "catch\s*\(\s*\w+\s*:\s*(Transport|IO)Exception" ...` 零命中。
 
 ## 1. 文档信息
 
@@ -497,6 +515,7 @@ val PAUSED_STATES = setOf(
 - `RUNNING → IDLE`：正常结束。
 - `RUNNING → PAUSED_* / BROKEN`：按失败类型分类（见 §4.5）。
 - `PAUSED_* / BROKEN → IDLE`：**仅由 `ResumeFromPauseUseCase`（用户"恢复同步"按钮）触发**；Worker 启动时若检测到 `syncState in PAUSED_STATES`，**立即返回 `Result.success()` 不做任何 Git 操作**（§4.5 "状态未由用户手动解除前不尝试任何 push"）。
+  - **CR P3-01 澄清**：`BROKEN` 状态下 Banner 同时显示"查看日志"与"恢复同步"两个按钮。"查看日志"跳转审计页做诊断，"恢复同步"触发 `ResumeFromPauseUseCase` 回到 `IDLE`。`PAUSED_CONFLICT` / `PAUSED_AUTH` / `PAUSED_FS` 只显示"恢复同步"。
 
 ### 4.3 Domain 层：`RunSyncUseCase`（Phase 2 核心）
 
@@ -747,6 +766,11 @@ class SimplyGitApp : Application(), Configuration.Provider {
 | 未知异常 | `SanitizedGitException.kind == SyncErrorKind.Unknown` 或任何 `Throwable` 兜底 | 单次不转移；连续 ≥ 3 次 → `BROKEN` | 同上 |
 | 磁盘空间不足 | `StatFs.availableBytes < 2 × localRepoSize` | 本次 skip，不转移 | 低优：`"磁盘空间不足，本次同步跳过"` |
 
+**Worker Result 映射（CR P2-06 明确）**：`RunSyncUseCase` 返回 `RunSyncOutcome` 后，`GitSyncWorker` 按以下规则映射到 WM 结果：
+- `NetworkErr` → `Result.retry()`：交给 WM 指数 backoff（30s → 1m → 2m … 5h 封顶）重试。
+- `UnknownErr` → `Result.success()`：**不走 WM backoff**。理由：OOM / 取消 / 未知本地 IO 这类异常，WM 隔几十秒重试大概率命中同一条件；失败计数已经由 `RunSyncUseCase.finishTransient` 累加到 3-strike `BROKEN` 预算，BROKEN 的通知与 UI 路径足以让用户介入——"隐形 backoff 重试"既无收益又浪费电。
+- 其余（`Ok` / `SkippedDebounce` / `SkippedPaused` / `NoBinding` / `PausedFs` / `PausedAuth` / `PausedConflict` / `MissingCredential`）→ `Result.success()`：状态机已入库，不需要 WM 再触发一次。
+
 **通知通道**：
 
 ```kotlin
@@ -818,6 +842,7 @@ data class SyncLogEntity(
     val conflictClass: String? = null,   // ConflictClass.name
     val errorCode: String? = null,
     val errorMsg: String? = null,        // 必须经 JGitExceptionSanitizer 脱敏
+    val errorType: String? = null,       // SanitizedGitException.originalType（CR P3-02），v2 Migration 新增
 )
 ```
 
@@ -837,20 +862,19 @@ data class SyncLogEntity(
   ```
   `cutoff = now - 7 days`，`maxRows = 500`。
 
-**迁移策略（DataStore → Room，I-5 / I-8 修复）**：
+**迁移策略（DataStore → Room，I-5 / I-8 / CR P2-01 / P2-02 修复）**：
 
-本迭代 `@Database(version = 1)`；迭代 1 的 `RepoBinding` 仅存于 DataStore Preferences（key：`vault_tree_uri` / `remote_url`）。升级路径：
+本迭代 `@Database(version = 2)`（v1 为 Iteration 2 初始 schema；v2 为 CR P3-02 新增 `sync_log.errorType` 后的升级，Migration 在 `SimplygitDatabase.MIGRATION_1_2` 提供并在 `DatabaseModule` 显式注册）；迭代 1 的 `RepoBinding` 仅存于 DataStore Preferences（key：`vault_tree_uri` / `remote_url` / `local_abs_path`）。升级路径：
 
-1. **首次启动 Iteration 2**，`SimplyGitApp.onCreate` 协程里异步执行 `RepoBindingRepositoryImpl.migrateFromDataStoreIfNeeded()`（**不阻塞 UI**）。
+1. **首次启动 Iteration 2**，`SimplyGitApp.onCreate` 在 `CoroutineScope(SupervisorJob() + Dispatchers.IO)` 上异步执行 `RepoBindingRepository.migrateFromDataStoreIfNeeded()`（**不阻塞 UI 首帧**）。迁移接口定义在 `domain/repository/RepoBindingRepository.kt`，由 `SimplyGitApp` 构造注入。
 2. 迁移内部走 `SimplygitDatabase.withTransaction { }` 原子化：
    - (a) 若 `sync_policy` 表为空，先 `INSERT` 一条默认 `SyncPolicyEntity(DEFAULT)`（§6.1），拿到 `policyId`。
-   - (b) 读 DataStore 的 `vault_tree_uri` + `remote_url` + `local_abs_path`；三者缺一则跳过本次迁移（用户尚未在迭代 1 完成绑定）。
+   - (b) 读 DataStore 的 `vault_tree_uri` + `remote_url` + `local_abs_path`；三者缺一则跳过本次迁移（用户尚未在迭代 1 完成绑定），**不**扣除 retry 配额。
    - (c) `INSERT RepositoryEntity(syncPolicyId = policyId, localAbsPath = ..., syncState = IDLE, ...)`。
-   - (d) 事务提交成功后写 DataStore key `migration_v1_done = true`。
-3. **迁移成功前不清 DataStore 源数据**（R-7）；成功后下次启动才 `clear()` 源 key。
-4. **迁移后 `SafUriStore`（迭代 1 的 DataStore Preferences 封装）deprecate**：`RepoBindingRepositoryImpl.observe()` 切换为读 `RepositoryDao.observeFirst()`；`SafUriStore` 保留 `@Deprecated` 标记**仅作为迁移源**，预计迭代 3 删除。本迭代代码库**不支持"DataStore + Room 双源并存写"**——所有新写入只落 Room。
-
-**失败降级**：迁移事务抛异常 → DataStore 源数据保留 → 下次启动重试；连续 3 次失败（写 DataStore `migration_v1_retry_count`）后打 `DiagnosticsLogger.logInfo("migration_failed", ...)` 并降级为"迭代 2 功能禁用，引导用户重新绑定 Vault"。
+   - (d) 事务提交成功后写 DataStore key `migration_v1_done = true` 并 `resetMigrationRetry()`。
+3. **迁移成功前不清 DataStore 源数据**（R-7）；**成功后下次冷启动**，`SimplyGitApp.onCreate` 重新调用 `migrateFromDataStoreIfNeeded()`，检测到 `migration_v1_done == true` + 源 key 仍存在 → 调用 `SafUriStore.clearLegacyBindingKeys()` 一次性删除三把源 key（保留 `migration_v1_done` 永久标记）。崩溃间歇的最坏情况是多做一次 no-op 清理，不会数据丢失。
+4. **迁移后 `SafUriStore`（迭代 1 的 DataStore Preferences 封装）deprecate**：`RepoBindingRepositoryImpl.observe()` 切换为读 `RepositoryDao.observeFirst()`；`SafUriStore` 保留 `@Deprecated` 标记**仅作为迁移源 + 迁移 bookkeeping 存储**（`migration_v1_done` / `migration_v1_retry_count`），预计迭代 3 删除。本迭代代码库**不支持"DataStore + Room 双源并存写"**——所有新写入只落 Room。
+5. **失败降级路径（CR P2-01）**：迁移事务抛异常 → 源数据保留 → `legacyStore.incrementMigrationRetry()` 把计数 +1 并 `DiagnosticsLogger.logInfo("migration_failed", "attempt=N type=...")`；下一次冷启动自动重试。连续失败达到 `RepoBindingRepository.MAX_MIGRATION_RETRIES = 3` 次后，`isMigrationDisabled()` 返回 `true`；`HomeViewModel.init` 把该值并入 `HomeUiState.Bound.migrationDisabled`，`SyncStateBanner` 切换为红色横幅"数据迁移多次失败，请重新绑定 Vault"，屏蔽常规 `syncState` Banner——用户点"选择 Vault 目录"即走正常 Iteration 2 绑定路径，产生新的 `RepositoryEntity` 后 `count > 0`，下次启动自动翻转 `migration_v1_done = true`。
 
 ### 4.7 UI 层：三屏新增 + Home 扩展
 
@@ -862,7 +886,7 @@ data class SyncLogEntity(
 - `audit/{logId}`
 
 **`HomeScreen` 扩展**：
-- 顶部 **`SyncStateBanner`**：`IDLE`（绿，显示"下次同步：约 N 分钟后"）/ `RUNNING`（蓝，不可交互）/ `PAUSED_*`（橙 + "恢复同步"按钮 → `ResumeFromPauseUseCase`，弹二次确认）/ `BROKEN`（红 + "查看日志"按钮 → audit）。
+- 顶部 **`SyncStateBanner`**：`IDLE`（绿，显示"下次同步：约 N 分钟后"）/ `RUNNING`（蓝，不可交互）/ `PAUSED_CONFLICT` / `PAUSED_AUTH` / `PAUSED_FS`（橙 + "恢复同步"按钮 → `ResumeFromPauseUseCase`，弹二次确认）/ `BROKEN`（红 + "查看日志"按钮 → audit **+ "恢复同步"按钮** → `ResumeFromPauseUseCase`，见 §4.5 状态机规则，CR P3-01）。当 `migrationDisabled == true`（§4.6 步骤 5）时，Banner 切换为红色横幅"数据迁移多次失败，请重新绑定 Vault"，**屏蔽常规 state Banner**。
 - 右上角 **⚙ 策略** + **🕒 审计（带 badge）**。
 - **迭代 1 原四操作按钮（Clone / Pull / Commit / Push）保留，语义独立于状态机**（I-7 澄清）：
   - 手动按钮调用迭代 1 既有 UseCase 链路（`PullUseCase` / `PushUseCase` 等），**不经过 `RunSyncUseCase`**，**不读写 `syncState`**；其语义是"故障诊断 / 手动验证"，与 Worker 自动链路独立。
@@ -880,8 +904,8 @@ data class SyncLogEntity(
 **`SyncAuditScreen`**：
 - `LazyColumn` 加载 `observeRecent(30)`（考虑 pruning 上限 500，一次性加载 500 行可接受；**本迭代不引入 Paging**）。
 - 每行：起止时间、触发来源、结果徽标（OK/冲突/认证/网络/SAF/跳过）、commits pulled+pushed、`ConflictClass`。
-- 点击 → `SyncAuditDetailScreen`：完整字段 + 错误消息（已脱敏 + `originalType`）。
-- 底部 **"导出日志"** → `ExportLogsUseCase`：二次确认弹窗 → 打包 `SyncLog.recent(500)` JSON + `diagnostics-YYYY-MM-DD.log`（最近 7 天的日滚动文件，详见 §4.9.1）→ 写 `filesDir/exports/simplygit-<ts>.zip` → `ACTION_SEND` + `FileProvider`。**不自动上传**（§5.2 数据不出端）。
+- 点击 → `SyncAuditDetailScreen`：完整字段 + 错误消息（已脱敏）+ **`errorType`（CR P3-02 持久化，来自 `SanitizedGitException.originalType`，展示 JGit `TransportException` / `UnknownHostException` 等原始类型名，便于工程侧排查）**。
+- 底部 **"导出日志"** → `ExportLogsUseCase`：二次确认弹窗 → 打包 `SyncLog.recent(500)` JSON（含 `errorType` 字段）+ `diagnostics-YYYY-MM-DD.log`（最近 7 天的日滚动文件，详见 §4.9.1）→ 写 `filesDir/exports/simplygit-<ts>.zip` → `ACTION_SEND` + `FileProvider`。**不自动上传**（§5.2 数据不出端）。
 
 ### 4.8 依赖注入骨架（新增模块）
 
@@ -1059,6 +1083,7 @@ data class SyncLogModel(
     val filesChanged: Int,
     val conflictClass: ConflictClass?,
     val errorMsg: String?,
+    val errorType: String? = null,   // SanitizedGitException.originalType（CR P3-02）
 )
 
 enum class SyncResult {
@@ -1113,7 +1138,7 @@ data class CommitOutcome(val objectId: String, val filesChanged: Int)
 #### 6.2.1 迭代 1 接口扩展
 
 ```kotlin
-// === RepoBindingRepository（迭代 1）新增一个方法 ===
+// === RepoBindingRepository（迭代 1）新增 3 个方法 ===
 interface RepoBindingRepository {
     fun observe(): Flow<RepoBinding?>                          // 迭代 1 已有
     suspend fun requireCurrent(): RepoBinding                  // 迭代 1 已有（无 binding 时抛 IllegalStateException）
@@ -1127,6 +1152,21 @@ interface RepoBindingRepository {
      * 实现要点：读 RepositoryDao.findFirst()，若 localAbsPath == null 返回 null（§4.6 映射规则）。
      */
     suspend fun currentOrNull(): RepoBinding?
+
+    /**
+     * 【新增，CR P2-01 修复】由 `SimplyGitApp.onCreate` 在应用级 `SupervisorJob` 作用域内
+     * 异步调用；幂等，`migration_v1_done == true` 或 `repository` 表已有行时直接返回。
+     * 迁移事务失败 → 递增 `migration_v1_retry_count`，达到 [MAX_MIGRATION_RETRIES] = 3
+     * 后 [isMigrationDisabled] 翻转为 true。
+     */
+    suspend fun migrateFromDataStoreIfNeeded()
+
+    /** 【新增，CR P2-01 修复】连续 3 次迁移失败后返回 true；驱动 Home 重绑 Banner。 */
+    suspend fun isMigrationDisabled(): Boolean
+
+    companion object {
+        const val MAX_MIGRATION_RETRIES: Int = 3
+    }
 }
 
 // === CredentialRepository（迭代 1）新增一个方法 ===
@@ -1200,6 +1240,11 @@ interface SyncPolicyRepository {
 
 interface SyncLogRepository {
     fun observeRecent(limit: Int = 30): Flow<List<SyncLogModel>>
+
+    /**
+     * N4 单仓约束下（§2.4 / §4.6），实现 **可忽略** [repoId]，直接读 `repository`
+     * 表首行（§4.6 Iteration 2，CR P2-05）；参数保留供 Phase 3+ 多仓扩展直接升级。
+     */
     fun observeRepoState(repoId: Long): Flow<RepositoryStateSnapshot>
     suspend fun loadById(id: Long): SyncLogModel?
     suspend fun loadRepoState(repoId: Long): RepositoryStateSnapshot
@@ -1213,8 +1258,23 @@ interface SyncLogRepository {
         filesChanged: Int = 0,
         conflictClass: ConflictClass? = null,
         errorMsg: String? = null,
+        errorType: String? = null,         // CR P3-02：原始 Throwable 类型名
     )
     suspend fun updateSyncState(repoId: Long, state: SyncState)
+    /**
+     * CR P3-02：`pauseAndFinish` 在实际实现中合并 `updateSyncState + finishLog` 为
+     * 单一 `withTransaction`（见 §4.3 事务边界注释）；同样接受 `errorType`。
+     */
+    suspend fun pauseAndFinish(
+        repoId: Long,
+        logId: Long,
+        state: SyncState,
+        result: SyncResult,
+        endedAt: Instant,
+        conflictClass: ConflictClass? = null,
+        errorMsg: String? = null,
+        errorType: String? = null,
+    )
     suspend fun recentConsecutiveFailures(repoId: Long): Int
     suspend fun pruneExpired(now: Instant)
     suspend fun loadRecentForExport(limit: Int = 500): List<SyncLogModel>
@@ -1376,3 +1436,4 @@ interface NotificationPublisher {
 |---|---|---|---|
 | 2026-05-01 | v1.0 | alexjhwen | 初版：对齐总方案 §9 Phase 2（P2.1~P2.6）落地自动化静默同步：①新增 Runtime 层 `GitSyncWorker` + `PeriodicWorkRequest`（15/30/60/MANUAL_ONLY + Constraints + Backoff）；②`SyncPolicy` 配置面 + 下周期生效；③Worker 内防抖（2min 静默期）+ 空 commit 抑制 + 幂等；④`ConflictClassifier` 纯函数映射 `MergeResult.MergeStatus` → 六类冲突；⑤Room 审计表 + 500 条/7 天滚动清理；⑥通知分级 + A13 权限拒绝降级为首页 badge；⑦`PAUSED_FS/AUTH/CONFLICT/BROKEN` 四态 + 用户"恢复同步"；⑧catch-up `OneTimeWorkRequest` 冷启动补偿；⑨日志 ZIP 导出（二次确认 + FileProvider + ACTION_SEND，不自动上传）；⑩NFR 验收：日均耗电 ≤ 2%、成功率 ≥ 98%、通知触达 100%。显式不做：冲突解决 UI / SSH / OkHttp Transport / FileObserver / Shallow Clone / WindowCacheConfig 分档（均下沉到 Phase 3+）。 |
 | 2026-05-02 | v1.1 | alexjhwen | 首轮评审修订（闭环 2 P0 + 6 P1 + 2 P2，评审报告见 `docs/version/review/Iteration2_Auto_Silent_Sync_REVIEW.md`）：①I-1：异常分派改由 `SanitizedGitException.kind: SyncErrorKind { Auth / Network / Unknown }` 承载，`JGitExceptionSanitizer.classifyKind` 基于 JGit `TransportException` 关键字 + JDK 网络异常类型启发式分类；`RunSyncUseCase` catch 改为 `when (e.kind)` 分派，不再引用不存在的 `AuthFailedException` / `NetworkException`。②I-2：`RepoBindingRepository` 新增 `currentOrNull()`、`CredentialRepository` 新增 `snapshotIdentity()`、`GitRepository` 新增 `pullAndClassify` / `commitAllIfDirty`（与原 `pull` / `commitAll` **并存**，手动按钮继续走原方法）；`RunSyncUseCase` 通过 `snapshotIdentity()` 获取 username / email。③I-3 + I-9：`ConflictClassifier` 从 Domain 下沉到 `data/git/`，仅在 `Git.open(dir).use{}` 作用域内调用；`GitRepository.pullAndClassify` 返回纯数据 `PullOutcomeClassified`（无 JGit 原生引用）；新增 §6.2.3 架构边界声明 + A11d CI 静态 grep 兜底。④I-4：`DiagnosticsLogger` 升级为按日滚动 `diagnostics-YYYY-MM-DD.log`（单日 64 KB 上限 + 7 天 prune），对应 A9b/A9e 断言。⑤I-5：`RepositoryEntity.syncPolicyId` 补 `@ForeignKey(entity = SyncPolicyEntity::class, onDelete = RESTRICT)` + Index；迁移内置"先插 policy 再插 repository"顺序。⑥I-6：补 `isBinaryByAttribute` / `isBinaryByFirst8KB` / `isAncestor` 实现要点伪代码。⑦I-7：澄清 Home 四手动按钮"调用迭代 1 原 UseCase、不读写 `syncState`、不落 `SyncLog`、手动成功不自动解除 `PAUSED_*`"。⑧I-8：DataStore→Room 迁移后 `SafUriStore` 标 `@Deprecated` 仅作迁移源，新写入只落 Room；连续 3 次迁移失败降级为"引导重新绑定"。⑨I-10：删除"Worker 200ms 冷启动预算"，NF2 端到端预算已覆盖。⑩新增 A11 异常分派 + 架构边界验收；新增 R-11 `SyncErrorKind` 误判风险缓解；§9 SC15 转 ✅，新增 SC16 架构边界自检项。 |
+| 2026-05-02 | v1.2 | alexjhwen | 二轮 CR 修订（1 中 + 6 低全部闭环）：①CR-P2-01：`RepoBindingRepository` 新增 `migrateFromDataStoreIfNeeded()` / `isMigrationDisabled()` 公开接口 + `MAX_MIGRATION_RETRIES = 3` 常量；`SimplyGitApp.onCreate` 显式以 `CoroutineScope(SupervisorJob() + Dispatchers.IO).launch` 异步挂接迁移；`SafUriStore` 新增 `migration_v1_done` / `migration_v1_retry_count` 双标记 + `markMigrationDone` / `incrementMigrationRetry` / `resetMigrationRetry` / `clearLegacyBindingKeys`；连续 3 次失败翻转 `isMigrationDisabled`，`HomeUiState.Bound.migrationDisabled` 驱动 `SyncStateBanner` 切红色重绑横幅。②CR-P2-02：迁移成功后**下一轮冷启动** `SafUriStore.clearLegacyBindingKeys` 一次性删除源 key，`migration_v1_done` 永久保留（R-7 "migrate-then-clear"）。③CR-P2-03：`ConflictClassifier` 显式改 `internal class`，缩紧包可见性边界。④CR-P2-05：`SyncLogRepository.observeRepoState(repoId)` KDoc 明确 N4 单仓前提忽略入参，为 Phase 3+ 多仓升级保留 source-compatible 签名。⑤CR-P2-06：§4.5 Worker Result 映射表显式声明 `UnknownErr → Result.success()` 不走 WM backoff（避免 OOM 类异常隐形重试，3-strike `BROKEN` 仍保障用户可感知）。⑥CR-P3-01：`SyncStateBanner` 在 `BROKEN` 状态下**同时提供"查看日志"+"恢复同步"**，对齐 §4.5 状态机"仅 ResumeFromPauseUseCase 可清除 PAUSED_* / BROKEN"。⑦CR-P3-02：`SyncLogEntity` / `SyncLogModel` 新增 `errorType: String?` 字段（承载 `SanitizedGitException.originalType`），`SyncLogRepository.finishLog` / `pauseAndFinish` 新增 `errorType` 参数；`ExportLogsUseCase` 的 JSON 导出同步加字段；`SyncAuditDetailScreen` 展示"异常类型"行；Room `@Database(version = 2)` + `SimplygitDatabase.MIGRATION_1_2`（`ALTER TABLE sync_log ADD COLUMN errorType TEXT`）+ `DatabaseModule.addMigrations`。⑧文档状态更新为 `CR通过`。 |

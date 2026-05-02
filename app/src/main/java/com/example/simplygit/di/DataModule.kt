@@ -15,9 +15,13 @@ import com.example.simplygit.data.credential.CredentialDataSource
 import com.example.simplygit.data.credential.CredentialRepositoryImpl
 import com.example.simplygit.data.credential.EncryptedCredentialDataSource
 import com.example.simplygit.data.git.GitRepositoryImpl
+import com.example.simplygit.data.sync.SyncLogRepositoryImpl
+import com.example.simplygit.data.sync.SyncPolicyRepositoryImpl
 import com.example.simplygit.domain.repository.CredentialRepository
 import com.example.simplygit.domain.repository.GitRepository
 import com.example.simplygit.domain.repository.RepoBindingRepository
+import com.example.simplygit.domain.repository.SyncLogRepository
+import com.example.simplygit.domain.repository.SyncPolicyRepository
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -118,7 +122,20 @@ abstract class RepositoryBindsModule {
 
     @Binds
     @Singleton
-    abstract fun bindGitRepository(
+    internal abstract fun bindGitRepository(
         impl: GitRepositoryImpl,
     ): GitRepository
+
+    // SPEC §4.8 Iteration 2: Room-backed repositories for sync policy / audit log.
+    @Binds
+    @Singleton
+    abstract fun bindSyncPolicyRepository(
+        impl: SyncPolicyRepositoryImpl,
+    ): SyncPolicyRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindSyncLogRepository(
+        impl: SyncLogRepositoryImpl,
+    ): SyncLogRepository
 }

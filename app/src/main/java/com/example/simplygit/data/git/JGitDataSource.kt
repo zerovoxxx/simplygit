@@ -1,6 +1,8 @@
 package com.example.simplygit.data.git
 
 import com.example.simplygit.di.IoDispatcher
+import com.example.simplygit.domain.model.CommitOutcome
+import com.example.simplygit.domain.model.PullOutcomeClassified
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import org.eclipse.jgit.api.Git
@@ -30,9 +32,10 @@ class SafPermissionRevokedException : RuntimeException("SAF permission revoked")
  * so callers must still zero the buffer they passed in.
  */
 @Singleton
-class JGitDataSource @Inject constructor(
+internal class JGitDataSource @Inject constructor(
     @IoDispatcher private val io: CoroutineDispatcher,
     private val sanitizer: JGitExceptionSanitizer,
+    private val conflictClassifier: ConflictClassifier,
 ) {
 
     suspend fun clone(
@@ -78,6 +81,40 @@ class JGitDataSource @Inject constructor(
         }.mapException(sanitizer)
     }
 
+    /**
+     * SPEC §4.2 / §4.9 Iteration 2 (fix I-2 / I-3): pull + classify inside the
+     * same `Git.open(dir).use{}` scope. Returns a pure DTO so the Domain layer
+     * never holds a JGit native reference.
+     *
+     * Failures funnel through [mapException] → [SanitizedGitException] (kind
+     * set by [JGitExceptionSanitizer.classifyKind]). Unlike [pull], we do NOT
+     * throw [PullConflictException]: conflict outcomes are expected and handled
+     * by [RunSyncUseCase] via the classification value.
+     */
+    suspend fun pullAndClassify(
+        localDir: File,
+        username: String,
+        pat: CharArray,
+    ): Result<PullOutcomeClassified> = withContext(io) {
+        runCatching {
+            Git.open(localDir).use { git ->
+                val provider = UsernamePasswordCredentialsProvider(username, pat)
+                val raw = git.pull()
+                    .setCredentialsProvider(provider)
+                    .setFastForward(MergeCommand.FastForwardMode.FF)
+                    .call()
+                val classification = conflictClassifier.classify(raw, git.repository)
+                val conflictPaths = conflictClassifier.conflictPaths(raw)
+                PullOutcomeClassified(
+                    classification = classification,
+                    commitsPulled = raw.fetchResult?.trackingRefUpdates?.size ?: 0,
+                    conflictPaths = conflictPaths,
+                    mergeStatusName = raw.mergeResult?.mergeStatus?.name,
+                )
+            }
+        }.mapException(sanitizer)
+    }
+
     suspend fun commitAll(
         localDir: File,
         message: String,
@@ -96,6 +133,40 @@ class JGitDataSource @Inject constructor(
                     .setCommitter(ident)
                     .call()
                     .id
+            }
+        }.mapException(sanitizer)
+    }
+
+    /**
+     * SPEC §4.3 Iteration 2 (fix I-2): same as [commitAll] but returns `null`
+     * for a clean working tree instead of throwing. Used by the silent-sync
+     * path: an already-committed-but-not-yet-pushed state can re-run the
+     * worker and just re-push without producing a duplicate commit.
+     */
+    suspend fun commitAllIfDirty(
+        localDir: File,
+        message: String,
+        authorName: String,
+        authorEmail: String,
+    ): Result<CommitOutcome?> = withContext(io) {
+        runCatching {
+            Git.open(localDir).use { git ->
+                git.add().addFilepattern(".").call()
+                val status = git.status().call()
+                if (status.isClean) return@use null
+                val filesChanged = status.added.size +
+                    status.changed.size +
+                    status.modified.size +
+                    status.removed.size +
+                    status.missing.size +
+                    status.untracked.size
+                val ident = PersonIdent(authorName, authorEmail)
+                val commit = git.commit()
+                    .setMessage(message)
+                    .setAuthor(ident)
+                    .setCommitter(ident)
+                    .call()
+                CommitOutcome(objectId = commit.id.name, filesChanged = filesChanged)
             }
         }.mapException(sanitizer)
     }

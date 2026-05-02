@@ -90,6 +90,10 @@ dependencies {
     ksp(libs.hilt.compiler)
     implementation(libs.androidx.hilt.navigation.compose)
 
+    // SPEC §4.1.1 (Iteration 2): @HiltWorker bridge for WorkManager.
+    implementation(libs.androidx.hilt.work)
+    ksp(libs.androidx.hilt.compiler)
+
     // Lifecycle / Coroutines
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.kotlinx.coroutines.android)
@@ -97,6 +101,17 @@ dependencies {
     // Storage
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.androidx.security.crypto)
+
+    // SPEC §4.1.1 (Iteration 2): Room for sync_policy / sync_log / repository persistence.
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+
+    // SPEC §4.1.1 (Iteration 2): WorkManager for the periodic sync engine.
+    implementation(libs.androidx.work.runtime.ktx)
+
+    // SPEC §4.1.1 (Iteration 2): NavHost for policy / audit screens.
+    implementation(libs.androidx.navigation.compose)
 
     // JGit — exclude bcprov (AOSP-bundled clash) and jsch (SSH not used in Phase 1).
     implementation(libs.jgit) {
@@ -111,10 +126,14 @@ dependencies {
     detektPlugins("io.gitlab.arturbosch.detekt:detekt-formatting:1.23.6")
 
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.ui.test.junit4)
+    // SPEC §4.1.1 (Iteration 2): WorkManager + Room instrumentation helpers.
+    androidTestImplementation(libs.androidx.work.testing)
+    androidTestImplementation(libs.androidx.room.testing)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 }

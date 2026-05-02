@@ -7,6 +7,10 @@
     <!-- SPEC §4.1.2: Used only for logging hints when Push fails due to network. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- SPEC §4.1.2 (Iteration 2): Android 13+ runtime notification permission.
+         Pre-A13 systems ignore this entry; A13+ requires it for Sync alert channels. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:name=".SimplyGitApp"
         android:allowBackup="false"
@@ -18,6 +22,34 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Simplygit"
         tools:targetApi="31">
+
+        <!-- SPEC §4.1.2 (Iteration 2): disable the default WorkManager Startup
+             initializer so SimplyGitApp can inject HiltWorkerFactory via
+             Configuration.Provider. Leaving the default initializer in place
+             makes @HiltWorker throw InstantiationException on first enqueue. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
+
+        <!-- SPEC §4.1.2 (Iteration 2): FileProvider used by ExportLogsUseCase
+             to share logs via ACTION_SEND without exposing filesDir paths. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"

@@ -54,4 +54,101 @@
     <string name="error_saf_permission_revoked">Vault 目录的读写权限已被系统回收，请重新选择目录</string>
     <string name="error_missing_credential">尚未保存 GitHub 凭证</string>
     <string name="error_binding_missing">尚未完成仓库绑定（凭证 / 目录 / 远程 URL）</string>
+
+    <!-- ========================================================= -->
+    <!-- SPEC Iteration 2 — SyncStateBanner (§4.7). -->
+    <!-- ========================================================= -->
+    <string name="banner_idle_next_sync">下次同步：约 %1$d 分钟后</string>
+    <string name="banner_idle_manual_only">当前为仅手动同步模式</string>
+    <string name="banner_idle_never">尚未配置自动同步</string>
+    <string name="banner_running">正在同步…</string>
+    <string name="banner_paused_conflict">检测到同步冲突，已暂停</string>
+    <string name="banner_paused_auth">GitHub 凭证失效，已暂停</string>
+    <string name="banner_paused_fs">Vault 目录授权已失效，已暂停</string>
+    <string name="banner_broken">连续同步失败，请检查网络或日志</string>
+    <string name="banner_migration_disabled">数据迁移多次失败，请点击下方"选择 Vault 目录"重新绑定。</string>
+    <string name="action_resume_sync">恢复同步</string>
+    <string name="action_view_logs">查看日志</string>
+    <string name="resume_confirm_title">确认恢复同步？</string>
+    <string name="resume_confirm_message">请先在桌面端处理冲突 / 更新凭证 / 重新授权，再确认恢复。</string>
+    <string name="resume_confirm_positive">已处理，恢复</string>
+    <string name="resume_confirm_negative">取消</string>
+
+    <!-- Top bar actions on Home -->
+    <string name="action_open_policy">同步策略</string>
+    <string name="action_open_audit">同步审计</string>
+    <string name="home_badge_pending">%1$d</string>
+
+    <!-- ========================================================= -->
+    <!-- SPEC Iteration 2 — SyncPolicyScreen (§4.7). -->
+    <!-- ========================================================= -->
+    <string name="policy_title">同步策略</string>
+    <string name="policy_section_interval">同步间隔</string>
+    <string name="policy_interval_15">每 15 分钟</string>
+    <string name="policy_interval_30">每 30 分钟</string>
+    <string name="policy_interval_60">每 60 分钟</string>
+    <string name="policy_interval_manual">仅手动同步</string>
+    <string name="policy_section_constraints">同步约束</string>
+    <string name="policy_require_unmetered">仅 Wi-Fi</string>
+    <string name="policy_require_charging">仅充电</string>
+    <string name="policy_section_commit_template">Commit 模板</string>
+    <string name="policy_commit_template_hint">支持 %%ISO%% 占位符（自动替换为 ISO-8601 时间）</string>
+    <string name="policy_commit_template_preview">预览：%1$s</string>
+    <string name="action_save_policy">保存策略</string>
+    <string name="policy_notification_warn">通知权限未授予：失败仅以首页 badge 提示，不弹系统通知。</string>
+
+    <!-- ========================================================= -->
+    <!-- SPEC Iteration 2 — SyncAuditScreen (§4.7). -->
+    <!-- ========================================================= -->
+    <string name="audit_title">同步审计</string>
+    <string name="audit_detail_title">同步详情</string>
+    <string name="audit_empty">暂无同步记录</string>
+    <string name="audit_row_time">%1$s → %2$s</string>
+    <string name="audit_row_time_running">%1$s（进行中）</string>
+    <string name="audit_trigger_periodic">周期</string>
+    <string name="audit_trigger_manual">手动</string>
+    <string name="audit_trigger_catchup">补偿</string>
+    <string name="audit_result_ok">成功</string>
+    <string name="audit_result_conflict">冲突</string>
+    <string name="audit_result_network">网络错误</string>
+    <string name="audit_result_auth">认证失败</string>
+    <string name="audit_result_fs">目录授权失效</string>
+    <string name="audit_result_aborted">已中止</string>
+    <string name="audit_result_skipped_debounce">防抖跳过</string>
+    <string name="audit_result_skipped_paused">暂停跳过</string>
+    <string name="audit_row_summary">pulled %1$d / pushed %2$d / files %3$d</string>
+    <string name="audit_conflict_tag">冲突类型：%1$s</string>
+    <string name="audit_error_tag">错误：%1$s</string>
+    <string name="audit_error_type_tag">异常类型：%1$s</string>
+    <string name="action_export_logs">导出日志</string>
+    <string name="export_confirm_title">确认导出日志？</string>
+    <string name="export_confirm_message">导出包含仓库名、文件路径与脱敏后的错误信息（不含文件内容）。仅用于本地分享，SimplyGit 不会自动上传。</string>
+    <string name="export_confirm_positive">导出并分享</string>
+    <string name="export_confirm_negative">取消</string>
+    <string name="export_success">日志已写入 %1$s</string>
+    <string name="export_failure">导出失败：%1$s</string>
+
+    <!-- Conflict class display names (SPEC §4.2). -->
+    <string name="conflict_class_fast_forward">快进</string>
+    <string name="conflict_class_auto_merged">自动合并</string>
+    <string name="conflict_class_text_line">文本行冲突</string>
+    <string name="conflict_class_binary">二进制冲突</string>
+    <string name="conflict_class_delete_modify">删除/修改冲突</string>
+    <string name="conflict_class_remote_rewrite">远端重写</string>
+
+    <!-- ========================================================= -->
+    <!-- SPEC Iteration 2 — Notifications (§4.5). -->
+    <!-- ========================================================= -->
+    <string name="notif_channel_alert_name">同步告警</string>
+    <string name="notif_channel_alert_desc">冲突、认证失败、目录权限丢失等需用户介入的事件</string>
+    <string name="notif_channel_low_name">同步提示</string>
+    <string name="notif_channel_low_desc">连续失败、磁盘空间不足等低优事件</string>
+    <string name="notif_conflict_title">检测到同步冲突</string>
+    <string name="notif_conflict_body">冲突类型：%1$s，点击查看详情</string>
+    <string name="notif_auth_title">GitHub 凭证失效</string>
+    <string name="notif_auth_body">请更新 PAT 后在首页点击\"恢复同步\"</string>
+    <string name="notif_fs_title">Vault 目录授权已失效</string>
+    <string name="notif_fs_body">请在首页重新授权 Vault 目录</string>
+    <string name="notif_network_title">连续同步失败</string>
+    <string name="notif_network_body">请检查网络状态或查看同步日志</string>
 </resources>

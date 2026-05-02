@@ -5,6 +5,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -12,15 +13,23 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -39,9 +48,25 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.simplygit.R
 import com.example.simplygit.domain.model.GitOp
+import com.example.simplygit.domain.model.SyncPolicyModel
+import com.example.simplygit.domain.model.SyncState
 
+/**
+ * Home screen (SPEC §4.5 Iteration 1, §4.7 Iteration 2).
+ *
+ * SPEC I-7: the four Git buttons (Clone / Pull / Commit / Push) continue to
+ * operate the Iteration 1 manual path — they do NOT touch `syncState` nor
+ * produce `SyncLog` rows. Their purpose is diagnosis; the user still has to
+ * click "Resume sync" to leave a paused state.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Suppress("LongMethod")
 @Composable
-fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
+fun HomeScreen(
+    onOpenPolicy: () -> Unit = {},
+    onOpenAudit: () -> Unit = {},
+    viewModel: HomeViewModel = hiltViewModel(),
+) {
     val uiState by viewModel.uiState.collectAsState()
     val safState by viewModel.safState.collectAsState()
     val credView by viewModel.credentialView.collectAsState()
@@ -59,7 +84,38 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
         }
     }
 
-    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+    val bound = uiState as? HomeUiState.Bound
+
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.home_title)) },
+                actions = {
+                    IconButton(onClick = onOpenPolicy) {
+                        Text("⚙", style = MaterialTheme.typography.titleLarge)
+                    }
+                    Box {
+                        IconButton(onClick = onOpenAudit) {
+                            Text("🕒", style = MaterialTheme.typography.titleLarge)
+                        }
+                        val pending = bound?.pendingAlertCount ?: 0
+                        if (pending > 0) {
+                            Badge(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(end = 4.dp, top = 4.dp),
+                            ) {
+                                Text(
+                                    stringResource(R.string.home_badge_pending, pending),
+                                )
+                            }
+                        }
+                    }
+                },
+            )
+        },
+    ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -68,9 +124,10 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                text = stringResource(R.string.home_title),
-                style = MaterialTheme.typography.headlineMedium,
+            SyncStateBanner(
+                bound = bound,
+                onResume = { viewModel.onIntent(HomeIntent.ResumeSync) },
+                onViewLogs = onOpenAudit,
             )
 
             CredentialSection(
@@ -80,13 +137,13 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
             )
 
             VaultSection(
-                currentAbsPath = (uiState as? HomeUiState.Bound)?.localAbsPath,
+                currentAbsPath = bound?.localAbsPath,
                 safState = safState,
                 onPick = { pickerLauncher.launch(null) },
             )
 
             RemoteSection(
-                currentUrl = (uiState as? HomeUiState.Bound)?.remoteUrl,
+                currentUrl = bound?.remoteUrl,
                 onSubmit = { viewModel.onIntent(HomeIntent.SubmitRemote(it)) },
             )
 
@@ -107,6 +164,100 @@ fun HomeScreen(viewModel: HomeViewModel = hiltViewModel()) {
 }
 
 @Composable
+private fun SyncStateBanner(
+    bound: HomeUiState.Bound?,
+    onResume: () -> Unit,
+    onViewLogs: () -> Unit,
+) {
+    if (bound == null) return
+    // SPEC §4.6 Iteration 2 / fix CR P2-01: migration disabled overrides the
+    // regular state banner so the user is pushed toward a re-bind flow rather
+    // than silently stuck on an empty Home.
+    if (bound.migrationDisabled) {
+        Surface(color = Color(0xFFFFCDD2), modifier = Modifier.fillMaxWidth()) {
+            Text(
+                text = stringResource(R.string.banner_migration_disabled),
+                color = Color(0xFF1F1F1F),
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            )
+        }
+        return
+    }
+    val (bgColor, text) = bannerColorAndText(bound)
+    var confirmResume by remember { mutableStateOf(false) }
+    Surface(color = bgColor, modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text(text, color = Color(0xFF1F1F1F), modifier = Modifier.padding(end = 8.dp))
+            // SPEC §4.5 Iteration 2: state machine rule requires that
+            // PAUSED_* / BROKEN → IDLE is **only** driven by
+            // ResumeFromPauseUseCase (the "Resume sync" button). BROKEN
+            // additionally surfaces "View logs" as a diagnosis entry per §4.7.
+            when (bound.syncState) {
+                SyncState.PAUSED_CONFLICT,
+                SyncState.PAUSED_AUTH,
+                SyncState.PAUSED_FS,
+                -> OutlinedButton(onClick = { confirmResume = true }) {
+                    Text(stringResource(R.string.action_resume_sync))
+                }
+                SyncState.BROKEN -> Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedButton(onClick = onViewLogs) {
+                        Text(stringResource(R.string.action_view_logs))
+                    }
+                    OutlinedButton(onClick = { confirmResume = true }) {
+                        Text(stringResource(R.string.action_resume_sync))
+                    }
+                }
+                else -> Spacer(Modifier.size(0.dp))
+            }
+        }
+    }
+    if (confirmResume) {
+        AlertDialog(
+            onDismissRequest = { confirmResume = false },
+            title = { Text(stringResource(R.string.resume_confirm_title)) },
+            text = { Text(stringResource(R.string.resume_confirm_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmResume = false
+                    onResume()
+                }) { Text(stringResource(R.string.resume_confirm_positive)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmResume = false }) {
+                    Text(stringResource(R.string.resume_confirm_negative))
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun bannerColorAndText(bound: HomeUiState.Bound): Pair<Color, String> = when (bound.syncState) {
+    SyncState.IDLE -> Color(0xFFE8F5E9) to when {
+        bound.intervalMinutes == SyncPolicyModel.MANUAL_ONLY ->
+            stringResource(R.string.banner_idle_manual_only)
+        bound.remoteUrl.isNullOrBlank() || bound.username.isNullOrBlank() ->
+            stringResource(R.string.banner_idle_never)
+        else ->
+            stringResource(R.string.banner_idle_next_sync, bound.intervalMinutes)
+    }
+    SyncState.RUNNING -> Color(0xFFE3F2FD) to stringResource(R.string.banner_running)
+    SyncState.PAUSED_CONFLICT -> Color(0xFFFFE0B2) to stringResource(R.string.banner_paused_conflict)
+    SyncState.PAUSED_AUTH -> Color(0xFFFFE0B2) to stringResource(R.string.banner_paused_auth)
+    SyncState.PAUSED_FS -> Color(0xFFFFE0B2) to stringResource(R.string.banner_paused_fs)
+    SyncState.BROKEN -> Color(0xFFFFCDD2) to stringResource(R.string.banner_broken)
+}
+
+@Composable
 private fun CredentialSection(
     username: String?,
     onSubmit: (String, String, CharArray) -> Unit,
@@ -116,7 +267,6 @@ private fun CredentialSection(
     var e by remember { mutableStateOf("") }
     var pat by remember { mutableStateOf("") }
 
-    // Ensure we never leave the PAT buffer lying around when the composable leaves composition.
     DisposableEffect(Unit) { onDispose { pat = "" } }
 
     Text(stringResource(R.string.section_credential), style = MaterialTheme.typography.titleMedium)
@@ -294,8 +444,6 @@ private fun errorText(kind: ErrorKind): String = when (kind) {
 private fun successLabel(op: GitOp, desc: String): String = when (op) {
     GitOp.CLONE -> stringResource(R.string.status_success_clone)
     GitOp.PULL -> {
-        // SPEC §5.2 / M-3: desc is a structured "<count>|<status>" produced by the
-        // ViewModel; the UI composes the final localized string.
         val parts = desc.split("|", limit = 2)
         val count = parts.firstOrNull()?.toIntOrNull() ?: 0
         val status = parts.getOrNull(1).orEmpty()

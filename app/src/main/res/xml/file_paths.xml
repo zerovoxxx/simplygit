@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPEC §4.1.2 (Iteration 2): FileProvider only exposes the
+     filesDir/exports/ folder used by ExportLogsUseCase. -->
+<paths>
+    <files-path
+        name="exports"
+        path="exports/" />
+</paths>

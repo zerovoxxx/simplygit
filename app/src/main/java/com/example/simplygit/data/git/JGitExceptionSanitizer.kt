@@ -1,5 +1,11 @@
 package com.example.simplygit.data.git
 
+import org.eclipse.jgit.errors.TransportException
+import java.net.ConnectException
+import java.net.NoRouteToHostException
+import java.net.SocketException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -14,6 +20,10 @@ import javax.inject.Singleton
  * The sanitizer flattens the whole cause chain: every layer's message is cleaned and
  * concatenated so downstream consumers never receive the original Throwable (whose
  * `cause` could still carry sensitive text).
+ *
+ * SPEC Iteration 2 (fix I-1): every sanitized exception also carries a
+ * [SyncErrorKind] tag so `RunSyncUseCase` can dispatch on auth / network / unknown
+ * branches without introducing dedicated exception subclasses.
  */
 @Singleton
 class JGitExceptionSanitizer @Inject constructor() {
@@ -31,7 +41,46 @@ class JGitExceptionSanitizer @Inject constructor() {
                 depth++
             }
         }
-        return SanitizedGitException(chain, t.javaClass.simpleName)
+        return SanitizedGitException(chain, t.javaClass.simpleName, classifyKind(t))
+    }
+
+    /**
+     * Walks the cause chain and returns the first matching classification
+     * (SPEC §4.2 / §4.5 Iteration 2 / fix I-1).
+     *
+     *  - [SyncErrorKind.Auth] — JGit [TransportException] whose message contains
+     *    "401" / "403" / "not authorized" (case-insensitive). JGit 6.10 surfaces
+     *    GitHub's rejection with exactly one of these markers.
+     *  - [SyncErrorKind.Network] — standard JDK network exceptions
+     *    (UnknownHost / NoRouteToHost / Connect / Socket / SocketTimeout).
+     *  - [SyncErrorKind.Unknown] — anything else, including JGit's own
+     *    IOExceptions, OOM, cancelled coroutines.
+     */
+    internal fun classifyKind(t: Throwable): SyncErrorKind {
+        var current: Throwable? = t
+        var depth = 0
+        val seen = HashSet<Throwable>()
+        while (current != null && depth < MAX_DEPTH && seen.add(current)) {
+            when (current) {
+                is TransportException -> {
+                    val msg = current.message.orEmpty()
+                    if (msg.contains("not authorized", ignoreCase = true) ||
+                        msg.contains("401") ||
+                        msg.contains("403")
+                    ) {
+                        return SyncErrorKind.Auth
+                    }
+                }
+                is UnknownHostException,
+                is NoRouteToHostException,
+                is ConnectException,
+                is SocketException,
+                is SocketTimeoutException -> return SyncErrorKind.Network
+            }
+            current = current.cause
+            depth++
+        }
+        return SyncErrorKind.Unknown
     }
 
     /** Public helper so non-throwable text (e.g. raw messages) can go through the same filter. */

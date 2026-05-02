@@ -1,3 +1,5 @@
+@file:Suppress("UNCHECKED_CAST")
+
 package com.example.simplygit.ui.home
 
 import android.content.ClipData
@@ -9,11 +11,17 @@ import androidx.lifecycle.viewModelScope
 import com.example.simplygit.data.git.PullOutcome
 import com.example.simplygit.data.git.SafPermissionRevokedException
 import com.example.simplygit.data.git.SanitizedGitException
+import com.example.simplygit.data.sync.RepositoryDao
 import com.example.simplygit.domain.model.GitOp
 import com.example.simplygit.domain.model.GitOpResult
+import com.example.simplygit.domain.model.RepositoryStateSnapshot
+import com.example.simplygit.domain.model.SyncPolicyModel
+import com.example.simplygit.domain.model.SyncState
 import com.example.simplygit.domain.repository.CredentialPublicView
 import com.example.simplygit.domain.repository.CredentialRepository
 import com.example.simplygit.domain.repository.RepoBindingRepository
+import com.example.simplygit.domain.repository.SyncLogRepository
+import com.example.simplygit.domain.repository.SyncPolicyRepository
 import com.example.simplygit.domain.usecase.BindRemoteUseCase
 import com.example.simplygit.domain.usecase.BindVaultOutcome
 import com.example.simplygit.domain.usecase.BindVaultUseCase
@@ -23,6 +31,8 @@ import com.example.simplygit.domain.usecase.MissingBindingException
 import com.example.simplygit.domain.usecase.MissingCredentialException
 import com.example.simplygit.domain.usecase.PullRepoUseCase
 import com.example.simplygit.domain.usecase.PushRepoUseCase
+import com.example.simplygit.domain.usecase.ResumeFromPauseUseCase
+import com.example.simplygit.notification.NotificationPermissionHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.Channel
@@ -42,7 +52,7 @@ import kotlinx.coroutines.launch
 import java.util.Arrays
 import javax.inject.Inject
 
-/** User intents surfaced from [HomeScreen] (SPEC §4.5). */
+/** User intents surfaced from [HomeScreen] (SPEC §4.5 / §4.7). */
 sealed interface HomeIntent {
     data class SubmitCredential(val username: String, val email: String, val pat: CharArray) : HomeIntent
     data class PickVault(val uri: Uri) : HomeIntent
@@ -53,22 +63,29 @@ sealed interface HomeIntent {
     data object DoPush : HomeIntent
     data object DismissError : HomeIntent
     data object Reset : HomeIntent
+    data object ResumeSync : HomeIntent
+    data object RefreshNotificationPermission : HomeIntent
 }
 
 private const val CLIPBOARD_TAG = "simplygit-pat"
 private const val CLIPBOARD_CLEAR_DELAY_MS = 60_000L
 
 @HiltViewModel
+@Suppress("LongParameterList")
 class HomeViewModel @Inject constructor(
     @ApplicationContext private val appContext: Context,
     private val credRepo: CredentialRepository,
     private val bindingRepo: RepoBindingRepository,
+    private val syncPolicyRepo: SyncPolicyRepository,
+    private val syncLogRepo: SyncLogRepository,
+    private val repositoryDao: RepositoryDao,
     private val bindVault: BindVaultUseCase,
     private val bindRemote: BindRemoteUseCase,
     private val cloneRepo: CloneRepoUseCase,
     private val pullRepo: PullRepoUseCase,
     private val commitLocal: CommitLocalUseCase,
     private val pushRepo: PushRepoUseCase,
+    private val resumeSync: ResumeFromPauseUseCase,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Idle)
@@ -76,6 +93,18 @@ class HomeViewModel @Inject constructor(
 
     private val _safState = MutableStateFlow<SafResolveUiState>(SafResolveUiState.None)
     val safState: StateFlow<SafResolveUiState> = _safState.asStateFlow()
+
+    private val _notificationGranted = MutableStateFlow(
+        NotificationPermissionHelper.isGranted(appContext),
+    )
+
+    /**
+     * SPEC §4.6 Iteration 2 / fix CR P2-01: `true` when DataStore → Room
+     * migration has failed [RepoBindingRepository.MAX_MIGRATION_RETRIES]
+     * times. Polled once at cold start + re-polled on binding writes — its
+     * value is stable until the next app launch so we don't need a Flow.
+     */
+    private val _migrationDisabled = MutableStateFlow(false)
 
     /**
      * SPEC §4.6 / L-6: the "已绑定 @username" badge must stay visible even while a Git
@@ -85,36 +114,73 @@ class HomeViewModel @Inject constructor(
     val credentialView: StateFlow<CredentialPublicView?> =
         credRepo.observe().stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    // Exposed primarily to keep the single-intent pattern predictable; not used by Home yet.
     private val _events = Channel<HomeEvent>(Channel.BUFFERED)
     val events = _events.receiveAsFlow()
 
     init {
-        // SPEC §4.5 / M-4: project binding + credential into `Bound` whenever we are
-        // *not* currently running an op. After a transient Error (which is keyboard-only
-        // dismissed via [HomeIntent.DismissError]) we also allow the projection to
-        // re-populate, so username/path stay fresh.
-        combine(bindingRepo.observe(), credRepo.observe()) { binding, cred ->
-            binding to cred
-        }.onEach { (binding, cred) ->
+        // SPEC §4.6 (CR P2-01): read the migration-disabled flag once; its
+        // value is stable until the next cold start.
+        viewModelScope.launch {
+            _migrationDisabled.value = runCatching { bindingRepo.isMigrationDisabled() }
+                .getOrDefault(false)
+        }
+
+        // SPEC §4.5 Iteration 1 + §4.7 Iteration 2:
+        // merge binding / credential / sync-state / policy / pending-count /
+        // notification-granted / migration-disabled into a single Bound projection.
+        combine(
+            bindingRepo.observe(),
+            credRepo.observe(),
+            syncLogRepo.observeRepoStateOrDefault(),
+            syncPolicyRepo.observe(),
+            repositoryDao.observePausedCount(),
+            _notificationGranted,
+            _migrationDisabled,
+        ) { values ->
+            val binding = values[0] as com.example.simplygit.domain.model.RepoBinding?
+            val cred = values[1] as CredentialPublicView?
+            val state = values[2] as RepositoryStateSnapshot
+            val policy = values[3] as SyncPolicyModel
+            val pending = values[4] as Int
+            val notifGranted = values[5] as Boolean
+            val migrationDisabled = values[6] as Boolean
+            HomeBoundSnapshot(
+                binding = binding,
+                cred = cred,
+                syncState = state.syncState,
+                intervalMinutes = policy.intervalMinutes,
+                pendingCount = pending,
+                notificationGranted = notifGranted,
+                migrationDisabled = migrationDisabled,
+            )
+        }.onEach { snapshot ->
             val prev = _uiState.value
             if (prev is HomeUiState.Working) return@onEach
             val keepLast = (prev as? HomeUiState.Bound)?.lastSuccess
-            // Error states are preserved until explicitly dismissed (SPEC §5.2).
             if (prev is HomeUiState.Error) return@onEach
             _uiState.value = HomeUiState.Bound(
-                treeUri = binding?.treeUri,
-                localAbsPath = binding?.localAbsPath,
-                remoteUrl = binding?.remoteUrl,
-                username = cred?.username,
+                treeUri = snapshot.binding?.treeUri,
+                localAbsPath = snapshot.binding?.localAbsPath,
+                remoteUrl = snapshot.binding?.remoteUrl,
+                username = snapshot.cred?.username,
                 lastSuccess = keepLast,
+                syncState = snapshot.syncState,
+                intervalMinutes = snapshot.intervalMinutes,
+                pendingAlertCount = snapshot.pendingCount,
+                notificationGranted = snapshot.notificationGranted,
+                migrationDisabled = snapshot.migrationDisabled,
             )
         }.launchIn(viewModelScope)
     }
 
     fun onIntent(intent: HomeIntent) {
-        // SPEC §4.5: single-operation serialization — drop intents while Working.
-        if (_uiState.value is HomeUiState.Working && intent !is HomeIntent.DismissError) return
+        // SPEC §4.5 Iteration 1: single-op serialization — drop intents while Working.
+        if (_uiState.value is HomeUiState.Working &&
+            intent !is HomeIntent.DismissError &&
+            intent !is HomeIntent.RefreshNotificationPermission
+        ) {
+            return
+        }
         when (intent) {
             is HomeIntent.SubmitCredential -> submitCredential(intent)
             is HomeIntent.PickVault -> pickVault(intent.uri)
@@ -127,6 +193,9 @@ class HomeViewModel @Inject constructor(
             HomeIntent.DoPush -> runOp(GitOp.PUSH) { pushRepo() }
             HomeIntent.DismissError -> dismissError()
             HomeIntent.Reset -> _uiState.value = HomeUiState.Idle
+            HomeIntent.ResumeSync -> viewModelScope.launch { runCatching { resumeSync() } }
+            HomeIntent.RefreshNotificationPermission ->
+                _notificationGranted.value = NotificationPermissionHelper.isGranted(appContext)
         }
     }
 
@@ -134,8 +203,6 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 credRepo.save(intent.username.trim(), intent.email.trim(), intent.pat)
-                // SPEC §4.6 / M-2: schedule clipboard clearing on the ViewModel scope so
-                // it survives Composable teardown, Activity recreate etc.
                 scheduleClipboardClear()
             } finally {
                 Arrays.fill(intent.pat, '\u0000')
@@ -169,15 +236,12 @@ class HomeViewModel @Inject constructor(
     private fun dismissError() {
         val current = _uiState.value
         if (current is HomeUiState.Error) {
-            // Fall back to a minimal Bound snapshot. The combine() in init will refresh
-            // the fields as soon as the next emission arrives.
             viewModelScope.launch {
                 _uiState.value = snapshotBound(last = null)
             }
         }
     }
 
-    /** Collapses any throwable into a UI-safe [ErrorKind] (SPEC §6.3 / L-2). */
     private fun toErrorKind(cause: Throwable): ErrorKind = when (cause) {
         is MissingCredentialException -> ErrorKind.MissingCredential
         is MissingBindingException -> ErrorKind.MissingBinding
@@ -189,35 +253,39 @@ class HomeViewModel @Inject constructor(
     private suspend fun snapshotBound(last: LastOpSummary?): HomeUiState.Bound {
         val binding = runCatching { bindingRepo.requireCurrent() }.getOrNull()
         val cred = credRepo.observe().firstOrNull()
+        val state = syncLogRepo.observeRepoStateOrDefault().firstOrNull()
+            ?: RepositoryStateSnapshot(
+                repoId = binding?.id ?: 0L,
+                syncState = SyncState.IDLE,
+                lastSyncAt = null,
+                lastSyncResult = null,
+            )
+        val policy = syncPolicyRepo.current()
+        val pending = repositoryDao.observePausedCount().firstOrNull() ?: 0
         return HomeUiState.Bound(
             treeUri = binding?.treeUri,
             localAbsPath = binding?.localAbsPath,
             remoteUrl = binding?.remoteUrl,
             username = cred?.username,
             lastSuccess = last,
+            syncState = state.syncState,
+            intervalMinutes = policy.intervalMinutes,
+            pendingAlertCount = pending,
+            notificationGranted = _notificationGranted.value,
+            migrationDisabled = _migrationDisabled.value,
         )
     }
 
-    /**
-     * SPEC §5.2 / A8 / M-3: description is structured (no hardcoded English); UI layer
-     * translates it via strings.xml.
-     */
     private fun successDesc(op: GitOp, payload: Any?): String = when (op) {
         GitOp.PULL -> {
             val outcome = payload as? PullOutcome
             val count = outcome?.commitsPulled ?: 0
             val status = outcome?.mergeStatus
-            // Use a stable machine-readable form: "<count>|<status-or-empty>". HomeScreen
-            // parses this and routes to R.string.status_pulled_commits[_with_status].
             "$count|${status ?: ""}"
         }
         GitOp.CLONE, GitOp.COMMIT, GitOp.PUSH -> ""
     }
 
-    /**
-     * SPEC §4.6 / M-2: clears the clipboard 60s after a successful credential save,
-     * provided the current clip was labeled by us.
-     */
     private fun scheduleClipboardClear() {
         viewModelScope.launch {
             delay(CLIPBOARD_CLEAR_DELAY_MS)
@@ -234,10 +302,6 @@ class HomeViewModel @Inject constructor(
         clearClipboardCompat(cm)
     }
 
-    /**
-     * [ClipboardManager.clearPrimaryClip] is API 28+. On API 26–27 fall back to
-     * overwriting the clipboard with an empty labeled clip.
-     */
     private fun clearClipboardCompat(cm: ClipboardManager) {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
             cm.clearPrimaryClip()
@@ -246,6 +310,32 @@ class HomeViewModel @Inject constructor(
         }
     }
 }
+
+private data class HomeBoundSnapshot(
+    val binding: com.example.simplygit.domain.model.RepoBinding?,
+    val cred: CredentialPublicView?,
+    val syncState: SyncState,
+    val intervalMinutes: Int,
+    val pendingCount: Int,
+    val notificationGranted: Boolean,
+    val migrationDisabled: Boolean,
+)
+
+/** Returns a fallback IDLE snapshot when no binding row exists yet. */
+private fun SyncLogRepository.observeRepoStateOrDefault() =
+    kotlinx.coroutines.flow.flow {
+        // We don't know the repoId until a binding exists. Emit an IDLE default first
+        // so the combine() has a value, then delegate to the repo's Flow.
+        emit(
+            RepositoryStateSnapshot(
+                repoId = 0L,
+                syncState = SyncState.IDLE,
+                lastSyncAt = null,
+                lastSyncResult = null,
+            ),
+        )
+        observeRepoState(0L).collect { emit(it) }
+    }
 
 /** One-shot signals surfaced to [HomeScreen] (not currently consumed). */
 sealed interface HomeEvent
