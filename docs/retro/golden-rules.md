@@ -25,6 +25,7 @@
 - **R6. JGit 原生类型字段必须追溯到持久化层**：若 Data 层 API 签名含 JGit 原生类型（如 `PersonIdent`、`ObjectId`、`RefSpec`），Spec 必须在 §"跨层字段传递矩阵"中追溯其每个组成字段（如 `PersonIdent` 的 `name`/`email`/`when`）的来源——是哪个持久化 key、哪个用户输入、还是哪个默认规则（如 `{username}@users.noreply.github.com`）。（来源：迭代 1）
 - **R7. 安全清理的生命周期不跟 UI 绑**：定时/延迟清理敏感数据（剪贴板、缓冲区、临时文件）的协程必须挂到 `viewModelScope` 或 Application-scoped singleton，不得用 `rememberCoroutineScope` / `LaunchedEffect`。判别标准：若动作语义是"用户态的定时义务"（即使 UI 关掉也要完成），就不能绑 UI 生命周期。（来源：迭代 1 CR M-2）
 - **R8. UI/日志前的异常必须走显式分派 + sanitizer 兜底**：Domain/UI 层不得直接使用 `Throwable.message` 呈现错误文案；必须经过 `sealed interface ErrorKind`（或同形态分派结构）：白名单域异常走本地化分支，其余统一走 sanitizer 包装后的 `Sanitized` 分支。`Result.Failure.cause` 在契约上仅允许 `SanitizedException` 或白名单类型。（来源：迭代 1 CR L-2）
+- **R9. Spec 中的接口扩展必须与既有链路显式对齐**：Spec §"接口定义"新增 / 修改既有 Repository / UseCase 签名时，必须显式说明三件事：①新签名与原签名是**替换还是并存**（若并存，迁移窗口）；②新签名删减的参数（如 username / author）之**新来源**（从哪个 Repository 的新方法读，还是 UseCase 内部拼）；③新签名抛出的异常类型是否**已在代码中存在**（不存在则同步声明新异常或在 sanitizer 中补分类枚举）。缺任一项视为 C1/C2 改动完备性不足，阻塞研发拆解。（来源：迭代 2 I-1 / I-2）
 
 ---
 

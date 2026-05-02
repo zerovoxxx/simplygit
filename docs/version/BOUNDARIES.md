@@ -16,3 +16,4 @@
 | 迭代 | 文档 | 边界摘要 |
 |------|------|---------|
 | 1 | [Iteration1_MVP_Core_Link_SPEC.md](./Iteration1_MVP_Core_Link_SPEC.md) | 只做 PAT 录入（ESP 加密） + SAF 单目录授权（含 canRead/canWrite 探测） + 手动 Clone/Pull(仅无冲突场景)/Commit/Push 端到端验证；不做 WorkManager 自动同步、目录树/Diff UI、冲突分级/解决、SSH、多仓、JGit 自定义 FS 适配。 |
+| 2 | [Iteration2_Auto_Silent_Sync_SPEC.md](./Iteration2_Auto_Silent_Sync_SPEC.md) | 只做 WorkManager 周期同步（15/30/60/MANUAL_ONLY + Constraints）、策略配置面、2min 防抖+空 commit 抑制、`ConflictClassifier` 六类分类、`PAUSED_FS/AUTH/CONFLICT/BROKEN` 状态机+"恢复同步"、Room 审计表（500 条/7 天滚动）、通知分级（A13 拒绝降级为首页 badge）、catch-up 冷启动补偿、日志 ZIP 导出（FileProvider，不自动上传）；不做冲突解决 UI、整文件二选一、SSH、OkHttp Transport 对接、FileObserver 事件触发、Shallow Clone、WindowCacheConfig 分档、多仓并行。 |
