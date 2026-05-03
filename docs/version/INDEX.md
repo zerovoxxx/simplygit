@@ -6,6 +6,7 @@
 |------|------|------|------|---------|
 | 1 | MVP 核心链路 | ✅ 已完成 | [Iteration1_MVP_Core_Link_SPEC.md](./Iteration1_MVP_Core_Link_SPEC.md) | 2026-05-01 |
 | 2 | 自动化静默同步 | ✅ 已完成 | [Iteration2_Auto_Silent_Sync_SPEC.md](./Iteration2_Auto_Silent_Sync_SPEC.md) | 2026-05-01 |
+| 3 | 冲突可视化 | ✅ 已完成 | [Iteration3_Conflict_Visualization_SPEC.md](./Iteration3_Conflict_Visualization_SPEC.md) | 2026-05-02 |
 
 ## 变更记录
 
@@ -18,3 +19,7 @@
 | 2026-05-02 | v1.4 | alexjhwen | 迭代 2 Spec 首轮评审完成，发现 2 P0 + 6 P1 问题，状态保持"评审中"待修订；评审报告见 `docs/version/review/Iteration2_Auto_Silent_Sync_REVIEW.md`。 |
 | 2026-05-02 | v1.5 | alexjhwen | 迭代 2 Spec v1.1 修订完成，闭环 2 P0 + 6 P1 + 2 P2 共 10 个问题（核心改动：`SyncErrorKind` 异常分派 + `ConflictClassifier` 下沉 Data 层 + `DiagnosticsLogger` 按日滚动 + Room `@ForeignKey` + 接口扩展对齐 R9），状态流转为"评审完成（待开发）"。 |
 | 2026-05-02 | v1.6 | alexjhwen | feat(iter2)：自动化静默同步全量交付（G1-G9 + CR 1 中/6 低，Spec v1.2 → ✅），78 Kt 文件 + Room v1→v2 Migration；详见 SPEC §10。 |
+| 2026-05-02 | v1.7 | alexjhwen | 新增迭代 3：冲突可视化（目录树 + Diff + 整文件二选一 + SSH ed25519），对齐总方案 §9 Phase 3，Room v2→v3；详见 SPEC §10。 |
+| 2026-05-03 | v1.8 | alexjhwen | 迭代 3 Spec 首轮评审完成，发现 **5 P0 + 7 P1 + 1 P2** 共 13 个问题（核心：PullRepository/PushRepository/CloneRepository/SyncStateRepository/PushOutcome/SyncWorker/RepoDetailScreen/BindRepoScreen/Credential.Pat 等 9 处代码实体虚构，以及 `Repository.auth_type` Migration 未落 + 通知跳转链路未设计），状态保持"评审中"待修订；评审报告见 `docs/version/review/Iteration3_Conflict_Visualization_REVIEW.md`。 |
+| 2026-05-03 | v1.9 | alexjhwen | 迭代 3 Spec v1.1 修订完成，闭环 5 P0 + 7 P1 + 1 P2 共 13 个问题（核心：挂载点全部回归现有 `GitRepository/SyncLogRepository/HomeScreen/MainActivity`；新增 `ClearConflictPauseUseCase + SyncResult.CONFLICT_RESOLVED` 表达冲突解决语义；Migration v2→v3 追加 `ALTER repository ADD COLUMN auth_type`；通知新增 `NAV_CONFLICT + EXTRA_REPO_ID` 路由；`CredentialRepository` 不扩展，SSH 走独立 `SshKeyRepository`；Skip × Push 6 行真值表；`SshPassphraseCache` `@ApplicationScope`；删除 `DiffSource.COMMIT_VS_COMMIT` 冗余），状态流转为"评审完成（待开发）"。 |
+| 2026-05-03 | v2.0 | alexjhwen | feat(iter3)：冲突可视化全量交付（4 Phase / 72 文件 / +5750），SSH 链路 CR 11 问题闭环后 Spec v1.3 → ✅；详见 SPEC §10。 |

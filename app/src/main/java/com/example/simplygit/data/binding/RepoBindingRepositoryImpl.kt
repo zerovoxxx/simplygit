@@ -116,6 +116,26 @@ class RepoBindingRepositoryImpl @Inject constructor(
         }
     }
 
+    /**
+     * SPEC §4.4.3 / §6.1 Iteration 3: persist the auth tuple. We reject
+     * unknown [authType] values and mismatched [authRef] prefixes here
+     * rather than at the SQL layer so the contract violation never reaches
+     * the database.
+     */
+    override suspend fun saveAuth(authType: String, authRef: String) {
+        require(authType == "PAT" || authType == "SSH") { "authType must be PAT or SSH" }
+        if (authType == "PAT") {
+            require(authRef == "github_pat") { "PAT authRef must be 'github_pat'" }
+        } else {
+            require(authRef.startsWith("ssh_")) { "SSH authRef must start with 'ssh_'" }
+        }
+        db.withTransaction {
+            val existing = repoDao.findFirst()
+                ?: error("cannot saveAuth before binding exists")
+            repoDao.updateAuth(existing.id, authType, authRef)
+        }
+    }
+
     override suspend fun clear() {
         db.withTransaction {
             repoDao.clear()
@@ -223,6 +243,7 @@ class RepoBindingRepositoryImpl @Inject constructor(
         id = 0L,
         displayName = "default",
         remoteUrl = remoteUrl,
+        authType = "PAT",
         authRef = "github_pat",
         localTreeUri = treeUri,
         localAbsPath = absPath,
@@ -235,6 +256,8 @@ class RepoBindingRepositoryImpl @Inject constructor(
     )
 }
 
+// SPEC §6.1 Iteration 3 (P0-3 / P0-4): authType / authRef now flow
+// through RepoBinding so JGitDataSource.applyAuth() can dispatch on them.
 private fun RepositoryEntity?.toBindingOrNull(): RepoBinding? {
     if (this == null) return null
     if (localAbsPath.isNullOrBlank() || localTreeUri.isBlank() || remoteUrl.isBlank()) return null
@@ -243,5 +266,7 @@ private fun RepositoryEntity?.toBindingOrNull(): RepoBinding? {
         localAbsPath = localAbsPath,
         remoteUrl = remoteUrl,
         id = id,
+        authType = authType,
+        authRef = authRef,
     )
 }

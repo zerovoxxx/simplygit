@@ -14,12 +14,20 @@ import com.example.simplygit.data.binding.RepoBindingRepositoryImpl
 import com.example.simplygit.data.credential.CredentialDataSource
 import com.example.simplygit.data.credential.CredentialRepositoryImpl
 import com.example.simplygit.data.credential.EncryptedCredentialDataSource
+import com.example.simplygit.data.filetree.FileTreeRepositoryImpl
+import com.example.simplygit.data.git.ConflictRepositoryImpl
+import com.example.simplygit.data.git.DiffRepositoryImpl
 import com.example.simplygit.data.git.GitRepositoryImpl
+import com.example.simplygit.data.ssh.SshKeyRepositoryImpl
 import com.example.simplygit.data.sync.SyncLogRepositoryImpl
 import com.example.simplygit.data.sync.SyncPolicyRepositoryImpl
+import com.example.simplygit.domain.repository.ConflictRepository
 import com.example.simplygit.domain.repository.CredentialRepository
+import com.example.simplygit.domain.repository.DiffRepository
+import com.example.simplygit.domain.repository.FileTreeRepository
 import com.example.simplygit.domain.repository.GitRepository
 import com.example.simplygit.domain.repository.RepoBindingRepository
+import com.example.simplygit.domain.repository.SshKeyRepository
 import com.example.simplygit.domain.repository.SyncLogRepository
 import com.example.simplygit.domain.repository.SyncPolicyRepository
 import dagger.Binds
@@ -138,4 +146,32 @@ abstract class RepositoryBindsModule {
     abstract fun bindSyncLogRepository(
         impl: SyncLogRepositoryImpl,
     ): SyncLogRepository
+
+    // SPEC §4.1.1 Iteration 3: file-tree cache powering `RepoBrowserScreen`.
+    @Binds
+    @Singleton
+    internal abstract fun bindFileTreeRepository(
+        impl: FileTreeRepositoryImpl,
+    ): FileTreeRepository
+
+    // SPEC §4.2.1 Iteration 3: unified-diff view powered by JGit DiffFormatter.
+    @Binds
+    @Singleton
+    internal abstract fun bindDiffRepository(
+        impl: DiffRepositoryImpl,
+    ): DiffRepository
+
+    // SPEC §4.3 Iteration 3: checkout --ours/--theirs + commit glue.
+    @Binds
+    @Singleton
+    internal abstract fun bindConflictRepository(
+        impl: ConflictRepositoryImpl,
+    ): ConflictRepository
+
+    // SPEC §4.4.1 Iteration 3: SSH key vault (independent of CredentialRepository).
+    @Binds
+    @Singleton
+    internal abstract fun bindSshKeyRepository(
+        impl: SshKeyRepositoryImpl,
+    ): SshKeyRepository
 }

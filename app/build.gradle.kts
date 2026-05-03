@@ -50,6 +50,9 @@ android {
             "META-INF/DEPENDENCIES",
             "META-INF/LICENSE.md",
             "META-INF/NOTICE.md",
+            // SPEC §4.7 Iteration 3: jgit-ssh-apache packages its own OSGi
+            // l10n properties that collide with the jgit core jar.
+            "OSGI-INF/l10n/plugin.properties",
         )
     }
 }
@@ -113,10 +116,15 @@ dependencies {
     // SPEC §4.1.1 (Iteration 2): NavHost for policy / audit screens.
     implementation(libs.androidx.navigation.compose)
 
-    // JGit — exclude bcprov (AOSP-bundled clash) and jsch (SSH not used in Phase 1).
+    // JGit — exclude bcprov (AOSP-bundled clash) and jsch (SSH via Apache MINA SSHD).
     implementation(libs.jgit) {
         exclude(group = "org.bouncycastle")
         exclude(group = "com.jcraft", module = "jsch")
+    }
+    // SPEC §4.7 Iteration 3: Apache MINA SSHD transport for JGit SSH auth.
+    // Pinned to the same jgit version to avoid ABI drift between core + ssh.apache.
+    implementation(libs.jgit.ssh.apache) {
+        exclude(group = "org.bouncycastle")
     }
 
     // Desugar (pairs with compileOptions.isCoreLibraryDesugaringEnabled).

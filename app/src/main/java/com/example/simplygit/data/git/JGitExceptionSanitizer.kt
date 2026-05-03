@@ -1,5 +1,8 @@
 package com.example.simplygit.data.git
 
+import com.example.simplygit.data.ssh.SshHostKeyChangedException
+import com.example.simplygit.data.ssh.SshHostKeyFirstConnectException
+import com.example.simplygit.data.ssh.SshKeyFormatException
 import org.eclipse.jgit.errors.TransportException
 import java.net.ConnectException
 import java.net.NoRouteToHostException
@@ -46,15 +49,24 @@ class JGitExceptionSanitizer @Inject constructor() {
 
     /**
      * Walks the cause chain and returns the first matching classification
-     * (SPEC §4.2 / §4.5 Iteration 2 / fix I-1).
+     * (SPEC §4.2 / §4.5 Iteration 2 / fix I-1, §6.2 Iteration 3 white-list).
      *
      *  - [SyncErrorKind.Auth] — JGit [TransportException] whose message contains
      *    "401" / "403" / "not authorized" (case-insensitive). JGit 6.10 surfaces
-     *    GitHub's rejection with exactly one of these markers.
+     *    GitHub's rejection with exactly one of these markers. Also classifies
+     *    [SshHostKeyChangedException] as Auth so the SSH host-key mismatch
+     *    drops the repo into `PAUSED_AUTH` via `RunSyncUseCase` (SPEC §4.4.2).
      *  - [SyncErrorKind.Network] — standard JDK network exceptions
      *    (UnknownHost / NoRouteToHost / Connect / Socket / SocketTimeout).
-     *  - [SyncErrorKind.Unknown] — anything else, including JGit's own
-     *    IOExceptions, OOM, cancelled coroutines.
+     *  - [SyncErrorKind.Unknown] — Iteration 3 white-listed failures that do
+     *    not map to any finer-grained category:
+     *    [ConflictResolutionFailedException], [SshKeyFormatException]. Also
+     *    used for anything else (JGit's own IOExceptions, OOM, cancelled
+     *    coroutines).
+     *
+     * Note: [SshHostKeyFirstConnectException] is **not** classified here —
+     * callers (e.g. `JGitDataSource`) must catch it before the sanitizer
+     * runs so the UI can surface a TOFU confirmation dialog (SPEC §6.2).
      */
     internal fun classifyKind(t: Throwable): SyncErrorKind {
         var current: Throwable? = t
@@ -62,6 +74,10 @@ class JGitExceptionSanitizer @Inject constructor() {
         val seen = HashSet<Throwable>()
         while (current != null && depth < MAX_DEPTH && seen.add(current)) {
             when (current) {
+                is SshHostKeyChangedException -> return SyncErrorKind.Auth
+                is ConflictResolutionFailedException,
+                is SshKeyFormatException,
+                -> return SyncErrorKind.Unknown
                 is TransportException -> {
                     val msg = current.message.orEmpty()
                     if (msg.contains("not authorized", ignoreCase = true) ||
@@ -101,9 +117,43 @@ class JGitExceptionSanitizer @Inject constructor() {
     }
 }
 
-/** Maps any failure inside [Result] through [JGitExceptionSanitizer]. */
+/**
+ * Maps any failure inside [Result] through [JGitExceptionSanitizer].
+ *
+ * Exception: [SshHostKeyFirstConnectException] (or a cause chain containing
+ * one) bypasses sanitization so the UI can catch the exact type and open a
+ * TOFU confirmation dialog (SPEC §6.2 — the single white-listed bypass).
+ */
 internal fun <T> Result<T>.mapException(sanitizer: JGitExceptionSanitizer): Result<T> =
     fold(
         onSuccess = { Result.success(it) },
-        onFailure = { Result.failure(sanitizer.sanitize(it)) },
+        onFailure = { t ->
+            val tofu = findCause(t, SshHostKeyFirstConnectException::class.java)
+            if (tofu != null) {
+                Result.failure(tofu)
+            } else {
+                Result.failure(sanitizer.sanitize(t))
+            }
+        },
     )
+
+/**
+ * Walks the cause chain up to [JGitExceptionSanitizer.MAX_DEPTH] entries
+ * looking for a throwable assignable to [type].
+ */
+private fun <T : Throwable> findCause(t: Throwable, type: Class<T>): T? {
+    var current: Throwable? = t
+    var depth = 0
+    val seen = HashSet<Throwable>()
+    while (current != null && depth < FIND_CAUSE_MAX_DEPTH && seen.add(current)) {
+        if (type.isInstance(current)) {
+            @Suppress("UNCHECKED_CAST")
+            return current as T
+        }
+        current = current.cause
+        depth++
+    }
+    return null
+}
+
+private const val FIND_CAUSE_MAX_DEPTH = 8

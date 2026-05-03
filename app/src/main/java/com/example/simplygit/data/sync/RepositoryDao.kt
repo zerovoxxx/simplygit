@@ -49,6 +49,13 @@ interface RepositoryDao {
     @Query("UPDATE repository SET remoteUrl = :url WHERE id = :id")
     suspend fun updateRemoteUrl(id: Long, url: String)
 
+    /**
+     * SPEC §6.1 Iteration 3: switch a repo between PAT / SSH.
+     * `authRef` = `"github_pat"` (PAT) or `"ssh_<keyId>"` (SSH).
+     */
+    @Query("UPDATE repository SET auth_type = :authType, authRef = :authRef WHERE id = :id")
+    suspend fun updateAuth(id: Long, authType: String, authRef: String)
+
     @Query(
         """
         UPDATE repository

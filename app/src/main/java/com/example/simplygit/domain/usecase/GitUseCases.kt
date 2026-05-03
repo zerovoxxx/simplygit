@@ -62,6 +62,15 @@ class GitOpPreflight @Inject constructor(
     suspend fun afterOp(op: GitOp, result: GitOpResult): GitOpResult {
         return when (result) {
             is GitOpResult.Failure -> {
+                // SPEC §6.2 Iteration 3: SshHostKeyFirstConnectException is
+                // the single exception white-listed to bypass sanitization —
+                // UI captures the exact type and opens a TOFU confirmation
+                // dialog. All other Throwables must go through the
+                // sanitizer before reaching UI/logs.
+                if (result.cause is com.example.simplygit.data.ssh.SshHostKeyFirstConnectException) {
+                    diagnostics.logGitOpFailure(op.name, result.cause)
+                    return result
+                }
                 // SPEC §6.3: every Throwable coming back from JGit must be sanitized
                 // before reaching UI/logs. GitRepositoryImpl already routes through
                 // JGitExceptionSanitizer, so cause is usually SanitizedGitException —

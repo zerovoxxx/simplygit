@@ -20,11 +20,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Badge
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -65,11 +68,16 @@ import com.example.simplygit.domain.model.SyncState
 fun HomeScreen(
     onOpenPolicy: () -> Unit = {},
     onOpenAudit: () -> Unit = {},
+    onBrowseRepo: (repoId: Long) -> Unit = {},
+    onResolveConflict: (repoId: Long) -> Unit = {},
+    onOpenSshKeys: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val safState by viewModel.safState.collectAsState()
     val credView by viewModel.credentialView.collectAsState()
+    val sshKeys by viewModel.sshKeys.collectAsState()
+    val tofuPrompt by viewModel.tofuPrompt.collectAsState()
     val context = LocalContext.current
 
     val pickerLauncher = rememberLauncherForActivityResult(
@@ -112,6 +120,27 @@ fun HomeScreen(
                             }
                         }
                     }
+                    // SPEC §4.4.3 / §5.1 Iteration 3 (P0-2): "SSH 密钥" lives
+                    // in an overflow menu so the AppBar primary surface stays
+                    // reserved for the most frequent actions.
+                    var overflow by remember { mutableStateOf(false) }
+                    Box {
+                        IconButton(onClick = { overflow = true }) {
+                            Text("⋮", style = MaterialTheme.typography.titleLarge)
+                        }
+                        DropdownMenu(
+                            expanded = overflow,
+                            onDismissRequest = { overflow = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.action_open_ssh_keys)) },
+                                onClick = {
+                                    overflow = false
+                                    onOpenSshKeys()
+                                },
+                            )
+                        }
+                    }
                 },
             )
         },
@@ -128,6 +157,7 @@ fun HomeScreen(
                 bound = bound,
                 onResume = { viewModel.onIntent(HomeIntent.ResumeSync) },
                 onViewLogs = onOpenAudit,
+                onResolveConflict = { bound?.repoId?.let { onResolveConflict(it) } },
             )
 
             CredentialSection(
@@ -147,6 +177,24 @@ fun HomeScreen(
                 onSubmit = { viewModel.onIntent(HomeIntent.SubmitRemote(it)) },
             )
 
+            // SPEC §4.4.3 Iteration 3 (P0-2): auth-mode radio directly under
+            // the bind form so users can flip between PAT / SSH without
+            // leaving Home.
+            AuthModeSection(
+                bound = bound,
+                sshKeys = sshKeys,
+                onSubmitAuth = { authType, keyId ->
+                    viewModel.onIntent(HomeIntent.SubmitAuthType(authType, keyId))
+                },
+                onOpenSshKeys = onOpenSshKeys,
+            )
+
+            // SPEC §4.1.2 / §5.1 Iteration 3: "Browse Vault" entry point.
+            BrowseRepoSection(
+                enabled = bound?.repoId != null && bound.repoId > 0L,
+                onBrowse = { bound?.repoId?.let { onBrowseRepo(it) } },
+            )
+
             OperationsSection(
                 enabled = uiState !is HomeUiState.Working,
                 onClone = { viewModel.onIntent(HomeIntent.DoClone) },
@@ -161,6 +209,35 @@ fun HomeScreen(
             )
         }
     }
+
+    // SPEC §4.4.2 Iteration 3 (P0-6 TOFU): first-connect confirmation. The
+    // dialog sits outside the Scaffold body so it overlays regardless of
+    // scroll state.
+    tofuPrompt?.let { prompt ->
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissTofuPrompt() },
+            title = { Text(stringResource(R.string.tofu_confirm_title)) },
+            text = {
+                Text(
+                    stringResource(
+                        R.string.tofu_confirm_body,
+                        prompt.host,
+                        prompt.fingerprint,
+                    ),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.confirmTofu(prompt) }) {
+                    Text(stringResource(R.string.tofu_confirm_positive))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.dismissTofuPrompt() }) {
+                    Text(stringResource(R.string.tofu_confirm_negative))
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -168,6 +245,7 @@ private fun SyncStateBanner(
     bound: HomeUiState.Bound?,
     onResume: () -> Unit,
     onViewLogs: () -> Unit,
+    onResolveConflict: () -> Unit,
 ) {
     if (bound == null) return
     // SPEC §4.6 Iteration 2 / fix CR P2-01: migration disabled overrides the
@@ -198,8 +276,20 @@ private fun SyncStateBanner(
             // PAUSED_* / BROKEN → IDLE is **only** driven by
             // ResumeFromPauseUseCase (the "Resume sync" button). BROKEN
             // additionally surfaces "View logs" as a diagnosis entry per §4.7.
+            // SPEC §4.3.2 Iteration 3 (P0-2 / R10): PAUSED_CONFLICT now
+            // surfaces "解决冲突" alongside "恢复同步".
             when (bound.syncState) {
-                SyncState.PAUSED_CONFLICT,
+                SyncState.PAUSED_CONFLICT -> Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedButton(onClick = onResolveConflict) {
+                        Text(stringResource(R.string.action_resolve_conflict))
+                    }
+                    OutlinedButton(onClick = { confirmResume = true }) {
+                        Text(stringResource(R.string.action_resume_sync))
+                    }
+                }
                 SyncState.PAUSED_AUTH,
                 SyncState.PAUSED_FS,
                 -> OutlinedButton(onClick = { confirmResume = true }) {
@@ -363,6 +453,104 @@ private fun RemoteSection(
         enabled = url.isNotBlank(),
         onClick = { onSubmit(url.trim()) },
     ) { Text(stringResource(R.string.action_save_remote)) }
+}
+
+@Composable
+private fun BrowseRepoSection(
+    enabled: Boolean,
+    onBrowse: () -> Unit,
+) {
+    if (!enabled) return
+    Row(modifier = Modifier.fillMaxWidth()) {
+        OutlinedButton(
+            onClick = onBrowse,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text(stringResource(R.string.action_browse_repo)) }
+    }
+}
+
+/**
+ * SPEC §4.4.3 / §5.1 Iteration 3 (P0-2): auth-mode radio row with an
+ * SSH-key picker that appears only when SSH is selected. Persisting the
+ * choice is decoupled from the Remote URL text field — flipping the radio
+ * writes `repository.auth_type` + `repository.authRef` immediately.
+ */
+@Composable
+private fun AuthModeSection(
+    bound: HomeUiState.Bound?,
+    sshKeys: List<com.example.simplygit.domain.model.SshKeyIndexEntry>,
+    onSubmitAuth: (authType: String, keyId: String?) -> Unit,
+    onOpenSshKeys: () -> Unit,
+) {
+    if (bound == null || bound.repoId == 0L) return
+    Text(
+        stringResource(R.string.section_auth_type),
+        style = MaterialTheme.typography.titleMedium,
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        AuthModeRadio(
+            selected = bound.authType == "PAT",
+            label = stringResource(R.string.auth_type_pat),
+            onClick = { onSubmitAuth("PAT", null) },
+        )
+        AuthModeRadio(
+            selected = bound.authType == "SSH",
+            label = stringResource(R.string.auth_type_ssh),
+            onClick = {
+                val firstKey = sshKeys.firstOrNull()
+                if (firstKey != null) {
+                    onSubmitAuth("SSH", firstKey.keyId)
+                }
+            },
+        )
+    }
+    if (bound.authType == "SSH") {
+        if (sshKeys.isEmpty()) {
+            OutlinedButton(onClick = onOpenSshKeys) {
+                Text(stringResource(R.string.ssh_key_select_none))
+            }
+        } else {
+            Text(
+                stringResource(R.string.ssh_key_select_label),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                sshKeys.forEach { key ->
+                    val currentRef = bound.authRef
+                    val selected = currentRef == key.keyId
+                    AuthModeRadio(
+                        selected = selected,
+                        label = stringResource(
+                            R.string.ssh_key_select_option,
+                            key.keyId,
+                            key.fingerprintSha256,
+                        ),
+                        onClick = { onSubmitAuth("SSH", key.keyId) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AuthModeRadio(
+    selected: Boolean,
+    label: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RadioButton(selected = selected, onClick = onClick)
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+    }
 }
 
 @Composable

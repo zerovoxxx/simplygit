@@ -5,7 +5,9 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import java.time.Clock
 import javax.inject.Qualifier
 import javax.inject.Singleton
@@ -17,6 +19,15 @@ annotation class IoDispatcher
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class DefaultDispatcher
+
+/**
+ * SPEC R7 / §4.4.1 Iteration 3: an Application-scoped [CoroutineScope] for
+ * deferred safe-cleanup work (e.g. SSH passphrase TTL) that must NOT be tied
+ * to UI lifecycle.
+ */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class ApplicationScope
 
 /**
  * Provides coroutine dispatchers (SPEC §4.4: all JGit calls must run on [IoDispatcher])
@@ -43,4 +54,10 @@ object DispatcherModule {
     @Provides
     @Singleton
     fun provideClock(): Clock = Clock.systemUTC()
+
+    @Provides
+    @Singleton
+    @ApplicationScope
+    fun provideApplicationScope(): CoroutineScope =
+        CoroutineScope(SupervisorJob() + Dispatchers.Default)
 }

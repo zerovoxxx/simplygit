@@ -20,6 +20,7 @@ import com.example.simplygit.domain.model.SyncState
 import com.example.simplygit.domain.repository.CredentialPublicView
 import com.example.simplygit.domain.repository.CredentialRepository
 import com.example.simplygit.domain.repository.RepoBindingRepository
+import com.example.simplygit.domain.repository.SshKeyRepository
 import com.example.simplygit.domain.repository.SyncLogRepository
 import com.example.simplygit.domain.repository.SyncPolicyRepository
 import com.example.simplygit.domain.usecase.BindRemoteUseCase
@@ -32,6 +33,7 @@ import com.example.simplygit.domain.usecase.MissingCredentialException
 import com.example.simplygit.domain.usecase.PullRepoUseCase
 import com.example.simplygit.domain.usecase.PushRepoUseCase
 import com.example.simplygit.domain.usecase.ResumeFromPauseUseCase
+import com.example.simplygit.domain.usecase.SaveAuthTypeUseCase
 import com.example.simplygit.notification.NotificationPermissionHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -65,6 +67,12 @@ sealed interface HomeIntent {
     data object Reset : HomeIntent
     data object ResumeSync : HomeIntent
     data object RefreshNotificationPermission : HomeIntent
+    /**
+     * SPEC §4.4.3 Iteration 3: user flipped the auth-mode radio on the
+     * bind form. `keyId` is ignored when [authType] is `"PAT"`; when it is
+     * `"SSH"` the ViewModel builds `authRef = "ssh_$keyId"`.
+     */
+    data class SubmitAuthType(val authType: String, val keyId: String?) : HomeIntent
 }
 
 private const val CLIPBOARD_TAG = "simplygit-pat"
@@ -79,6 +87,7 @@ class HomeViewModel @Inject constructor(
     private val syncPolicyRepo: SyncPolicyRepository,
     private val syncLogRepo: SyncLogRepository,
     private val repositoryDao: RepositoryDao,
+    private val sshKeyRepo: SshKeyRepository,
     private val bindVault: BindVaultUseCase,
     private val bindRemote: BindRemoteUseCase,
     private val cloneRepo: CloneRepoUseCase,
@@ -86,6 +95,7 @@ class HomeViewModel @Inject constructor(
     private val commitLocal: CommitLocalUseCase,
     private val pushRepo: PushRepoUseCase,
     private val resumeSync: ResumeFromPauseUseCase,
+    private val saveAuthType: SaveAuthTypeUseCase,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Idle)
@@ -93,6 +103,13 @@ class HomeViewModel @Inject constructor(
 
     private val _safState = MutableStateFlow<SafResolveUiState>(SafResolveUiState.None)
     val safState: StateFlow<SafResolveUiState> = _safState.asStateFlow()
+
+    /**
+     * SPEC §4.4.2 Iteration 3 (P0-6 TOFU): pending first-connect dialog.
+     * Non-null triggers [HomeScreen] to render the confirm modal.
+     */
+    private val _tofuPrompt = MutableStateFlow<TofuPrompt?>(null)
+    val tofuPrompt: StateFlow<TofuPrompt?> = _tofuPrompt.asStateFlow()
 
     private val _notificationGranted = MutableStateFlow(
         NotificationPermissionHelper.isGranted(appContext),
@@ -113,6 +130,16 @@ class HomeViewModel @Inject constructor(
      */
     val credentialView: StateFlow<CredentialPublicView?> =
         credRepo.observe().stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /**
+     * SPEC §4.4.3 Iteration 3: SSH key list published to the bind-form
+     * auth-mode radio's sub-dropdown. Empty list means the user has not
+     * generated or imported a key yet — UI surfaces a link to
+     * [Routes.SSH_KEYS] in that case.
+     */
+    val sshKeys: StateFlow<List<com.example.simplygit.domain.model.SshKeyIndexEntry>> =
+        sshKeyRepo.observeIndex()
+            .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private val _events = Channel<HomeEvent>(Channel.BUFFERED)
     val events = _events.receiveAsFlow()
@@ -169,6 +196,9 @@ class HomeViewModel @Inject constructor(
                 pendingAlertCount = snapshot.pendingCount,
                 notificationGranted = snapshot.notificationGranted,
                 migrationDisabled = snapshot.migrationDisabled,
+                repoId = snapshot.binding?.id ?: 0L,
+                authType = snapshot.binding?.authType ?: "PAT",
+                authRef = snapshot.binding?.authRef ?: "github_pat",
             )
         }.launchIn(viewModelScope)
     }
@@ -196,6 +226,33 @@ class HomeViewModel @Inject constructor(
             HomeIntent.ResumeSync -> viewModelScope.launch { runCatching { resumeSync() } }
             HomeIntent.RefreshNotificationPermission ->
                 _notificationGranted.value = NotificationPermissionHelper.isGranted(appContext)
+            is HomeIntent.SubmitAuthType -> submitAuthType(intent)
+        }
+    }
+
+    /**
+     * SPEC §4.4.3 Iteration 3: flip the binding between PAT and SSH.
+     *
+     *  - PAT: [authRef] is fixed to the single-slot key `"github_pat"`;
+     *  - SSH: the caller must have picked a `keyId`, which becomes
+     *    `ssh_<keyId>` — we fail silently (log + no-op) when `keyId` is null
+     *    so stale UI state cannot corrupt the binding row.
+     */
+    private fun submitAuthType(intent: HomeIntent.SubmitAuthType) {
+        viewModelScope.launch {
+            runCatching {
+                when (intent.authType) {
+                    "PAT" -> saveAuthType("PAT", "github_pat")
+                    "SSH" -> {
+                        val id = intent.keyId
+                        require(!id.isNullOrBlank()) { "keyId required for SSH" }
+                        // Callers pass keyId **without** the "ssh_" prefix.
+                        val ref = if (id.startsWith("ssh_")) id else "ssh_$id"
+                        saveAuthType("SSH", ref)
+                    }
+                    else -> error("unknown authType=${intent.authType}")
+                }
+            }
         }
     }
 
@@ -228,9 +285,52 @@ class HomeViewModel @Inject constructor(
                 GitOpResult.Success -> snapshotBound(LastOpSummary(op, successDesc(op, null)))
                 is GitOpResult.SuccessWithPayload ->
                     snapshotBound(LastOpSummary(op, successDesc(op, result.payload)))
-                is GitOpResult.Failure -> HomeUiState.Error(op, toErrorKind(result.cause))
+                is GitOpResult.Failure -> {
+                    // SPEC §4.4.2 Iteration 3 (P0-6): TOFU first-connect
+                    // bypasses the normal Error state — we surface a confirm
+                    // dialog instead so the user can accept or cancel the
+                    // fingerprint. Cancelling simply returns to the last
+                    // bound snapshot without writing known_hosts.
+                    val tofu = result.cause as?
+                        com.example.simplygit.data.ssh.SshHostKeyFirstConnectException
+                    if (tofu != null) {
+                        _tofuPrompt.value = TofuPrompt(
+                            host = tofu.host,
+                            fingerprint = tofu.fingerprint,
+                            pendingOp = op,
+                        )
+                        snapshotBound(last = null)
+                    } else {
+                        HomeUiState.Error(op, toErrorKind(result.cause))
+                    }
+                }
             }
         }
+    }
+
+    /**
+     * SPEC §4.4.2 Iteration 3 (P0-6 TOFU): called when the user taps
+     * "confirm" on the first-connect dialog — persists the fingerprint and
+     * retries the pending op. Cancellation routes through
+     * [dismissTofuPrompt].
+     */
+    fun confirmTofu(prompt: TofuPrompt) {
+        viewModelScope.launch {
+            runCatching {
+                sshKeyRepo.acceptHostKey(prompt.host, prompt.fingerprint)
+            }
+            _tofuPrompt.value = null
+            when (prompt.pendingOp) {
+                GitOp.CLONE -> onIntent(HomeIntent.DoClone)
+                GitOp.PULL -> onIntent(HomeIntent.DoPull)
+                GitOp.PUSH -> onIntent(HomeIntent.DoPush)
+                GitOp.COMMIT -> Unit // commit never hits the network
+            }
+        }
+    }
+
+    fun dismissTofuPrompt() {
+        _tofuPrompt.value = null
     }
 
     private fun dismissError() {
@@ -273,6 +373,9 @@ class HomeViewModel @Inject constructor(
             pendingAlertCount = pending,
             notificationGranted = _notificationGranted.value,
             migrationDisabled = _migrationDisabled.value,
+            repoId = binding?.id ?: 0L,
+            authType = binding?.authType ?: "PAT",
+            authRef = binding?.authRef ?: "github_pat",
         )
     }
 

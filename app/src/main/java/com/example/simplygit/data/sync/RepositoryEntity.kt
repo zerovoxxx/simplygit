@@ -1,16 +1,23 @@
 package com.example.simplygit.data.sync
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
 /**
- * Row shape for the `repository` table (SPEC §4.6 / §6.1 Iteration 2).
+ * Row shape for the `repository` table (SPEC §4.6 / §6.1 Iteration 2, §6.1
+ * Iteration 3).
  *
  * Iteration 2 fix I-5: `syncPolicyId` references `sync_policy.id` with
  * `ON DELETE RESTRICT` so a policy cannot be silently deleted while a repo
  * still points at it. N4 keeps the row count at 1 for this iteration.
+ *
+ * Iteration 3 P0-3 (SPEC §6.1): adds [authType] so SSH-authenticated repos
+ * can coexist with PAT-authenticated ones. Default `"PAT"` preserves
+ * backward compatibility for rows created before v3; the ALTER migration is
+ * in [SimplygitDatabase.MIGRATION_2_3].
  *
  * - [localAbsPath] is nullable: SAF `ResolveResult` may return `NotPrimary`
  *   / `NotReadable` and leave the absolute path unresolved. `RunSyncUseCase`
@@ -34,7 +41,16 @@ data class RepositoryEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val displayName: String,
     val remoteUrl: String,
-    /** "github_pat" in Iteration 2 (placeholder for future auth types). */
+    /**
+     * Iteration 3 (§6.1 P0-3): `"PAT"` | `"SSH"`. Stored as `TEXT`.
+     * Default keeps legacy v2 rows compiling.
+     */
+    @ColumnInfo(name = "auth_type") val authType: String = "PAT",
+    /**
+     * PAT mode: always `"github_pat"` (matches `EncryptedCredentialDataSource`
+     * key). SSH mode: `"ssh_<keyId>"` — pointer into
+     * `SshKeyDataSource`'s `EncryptedFile` directory.
+     */
     val authRef: String,
     val localTreeUri: String,
     val localAbsPath: String?,

@@ -16,6 +16,14 @@ sealed interface SyncErrorKind {
     /** UnknownHost / NoRouteToHost / ConnectException / SocketException / timeout. */
     data object Network : SyncErrorKind
 
+    /**
+     * Precondition not met (e.g. [com.example.simplygit.domain.usecase.ResolveConflictUseCase]
+     * invoked while `syncState` is not `PAUSED_CONFLICT`, or the request enumerates only SKIP
+     * choices). Callers distinguish this from [Unknown] to drive a "request is invalid" UI
+     * copy rather than "something went wrong internally" (SPEC §4.3.1 Iteration 3).
+     */
+    data object InvalidState : SyncErrorKind
+
     /** Everything else: JGit internal errors, OOM, local IO, unexpected state. */
     data object Unknown : SyncErrorKind
 }

@@ -213,7 +213,13 @@ class RunSyncUseCase @Inject constructor(
             errorType = e.originalType,
             outcome = RunSyncOutcome.NetworkErr,
         )
-        SyncErrorKind.Unknown -> finishTransient(
+        // InvalidState should never escape Data-layer sanitization during a background sync
+        // (it signals a domain-level precondition violation, not a JGit exception). Fold it
+        // into Unknown so `sync_log.result = ABORTED` still lands — identical telemetry to
+        // the existing `SyncErrorKind.Unknown` branch.
+        SyncErrorKind.InvalidState,
+        SyncErrorKind.Unknown,
+        -> finishTransient(
             repoId = repoId,
             logId = logId,
             result = SyncResult.ABORTED,

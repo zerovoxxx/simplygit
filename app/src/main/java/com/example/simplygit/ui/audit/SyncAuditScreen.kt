@@ -211,6 +211,7 @@ private fun AuditRow(row: SyncLogModel, onClick: () -> Unit) {
 private fun SyncLogModel.resultLabel(): String = when (result) {
     SyncResult.OK -> stringResource(R.string.audit_result_ok)
     SyncResult.CONFLICT -> stringResource(R.string.audit_result_conflict)
+    SyncResult.CONFLICT_RESOLVED -> stringResource(R.string.sync_result_conflict_resolved)
     SyncResult.NETWORK_ERR -> stringResource(R.string.audit_result_network)
     SyncResult.AUTH_ERR -> stringResource(R.string.audit_result_auth)
     SyncResult.FS_ERR -> stringResource(R.string.audit_result_fs)

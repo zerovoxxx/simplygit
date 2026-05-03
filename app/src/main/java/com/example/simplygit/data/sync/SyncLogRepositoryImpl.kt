@@ -122,7 +122,10 @@ class SyncLogRepositoryImpl @Inject constructor(
         val recent = logDao.recentFinishedResults(repoId = repoId, scanLimit = FAILURE_SCAN_LIMIT)
             .mapNotNull { name -> runCatching { SyncResult.valueOf(name) }.getOrNull() }
             .filter { it != SyncResult.SKIPPED_DEBOUNCE && it != SyncResult.SKIPPED_PAUSED }
-        return recent.takeWhile { it != SyncResult.OK }.count()
+        // Iteration 3: CONFLICT_RESOLVED is a user-driven success outcome and
+        // must NOT count toward the BROKEN-streak budget.
+        return recent.takeWhile { it != SyncResult.OK && it != SyncResult.CONFLICT_RESOLVED }
+            .count()
     }
 
     override suspend fun pruneExpired(now: Instant) {

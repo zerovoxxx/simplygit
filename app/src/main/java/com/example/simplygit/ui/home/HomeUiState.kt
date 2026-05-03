@@ -34,6 +34,23 @@ sealed interface HomeUiState {
          * prompt banner instead of the regular SyncStateBanner.
          */
         val migrationDisabled: Boolean = false,
+        /**
+         * Row id of the currently-bound repository (SPEC §4.1.2 /
+         * §5.1 Iteration 3). `0` means "not persisted yet" — UI should treat
+         * Browser / Conflict entries as disabled in that state.
+         */
+        val repoId: Long = 0L,
+        /**
+         * SPEC §4.4.3 Iteration 3: the currently-persisted auth type on the
+         * binding row. Radio selection in the bind form defaults to this
+         * value on composition.
+         */
+        val authType: String = "PAT",
+        /**
+         * SPEC §4.4.3 Iteration 3: persisted `authRef` — either
+         * `"github_pat"` (PAT mode) or `"ssh_<keyId>"` (SSH mode).
+         */
+        val authRef: String = "github_pat",
     ) : HomeUiState
 
     data class Working(val op: GitOp, val startedAt: Long) : HomeUiState
@@ -54,6 +71,14 @@ sealed interface ErrorKind {
 }
 
 data class LastOpSummary(val op: GitOp, val description: String)
+
+/**
+ * SPEC §4.4.2 Iteration 3 (P0-6 TOFU flow): pending first-connect host key
+ * confirmation surfaced to [HomeScreen]. Non-null value triggers a modal
+ * AlertDialog; accepting calls back into the SSH repository to persist the
+ * fingerprint before re-running the op.
+ */
+data class TofuPrompt(val host: String, val fingerprint: String, val pendingOp: GitOp)
 
 /** Outcomes of resolving a SAF picker result (surfaced to UI for red-text hints). */
 sealed interface SafResolveUiState {

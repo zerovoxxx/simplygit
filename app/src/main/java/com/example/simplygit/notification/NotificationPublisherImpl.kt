@@ -20,13 +20,17 @@ import javax.inject.Singleton
 
 /**
  * Default [NotificationPublisher] backed by `NotificationManagerCompat`
- * (SPEC §4.5 Iteration 2).
+ * (SPEC §4.5 Iteration 2, §5.1 Iteration 3).
  *
  *  - High-priority events use [NotificationChannels.CHANNEL_SYNC_ALERT].
  *  - Network-broken uses [NotificationChannels.CHANNEL_SYNC_LOW] with
  *    dedup by repoId so repeated BROKEN transitions don't spam.
  *  - Android 13+: when `POST_NOTIFICATIONS` is denied we silently drop the
  *    notify call; the paused-count badge on Home picks up the slack.
+ *
+ * Iteration 3 (SPEC §5.1 P0-5): conflict notifications now deep-link to
+ * `NAV_CONFLICT` with a trailing `EXTRA_REPO_ID`; `MainActivity` routes the
+ * pair to `conflict/{repoId}`.
  */
 @Singleton
 class NotificationPublisherImpl @Inject constructor(
@@ -40,7 +44,8 @@ class NotificationPublisherImpl @Inject constructor(
             channelId = NotificationChannels.CHANNEL_SYNC_ALERT,
             title = context.getString(R.string.notif_conflict_title),
             body = body,
-            navKey = NAV_AUDIT,
+            navKey = NAV_CONFLICT,
+            repoId = repoId,
         )
     }
 
@@ -51,6 +56,7 @@ class NotificationPublisherImpl @Inject constructor(
             title = context.getString(R.string.notif_auth_title),
             body = context.getString(R.string.notif_auth_body),
             navKey = NAV_RESUME,
+            repoId = repoId,
         )
     }
 
@@ -61,6 +67,7 @@ class NotificationPublisherImpl @Inject constructor(
             title = context.getString(R.string.notif_fs_title),
             body = context.getString(R.string.notif_fs_body),
             navKey = NAV_RESUME,
+            repoId = repoId,
         )
     }
 
@@ -71,6 +78,7 @@ class NotificationPublisherImpl @Inject constructor(
             title = context.getString(R.string.notif_network_title),
             body = context.getString(R.string.notif_network_body),
             navKey = NAV_AUDIT,
+            repoId = repoId,
         )
     }
 
@@ -81,6 +89,7 @@ class NotificationPublisherImpl @Inject constructor(
             title = context.getString(R.string.app_name),
             body = msg,
             navKey = NAV_AUDIT,
+            repoId = 0L,
         )
     }
 
@@ -91,11 +100,13 @@ class NotificationPublisherImpl @Inject constructor(
         title: String,
         body: String,
         navKey: String,
+        repoId: Long,
     ) {
         if (!canPostNotifications()) return
         val intent = Intent(context, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             putExtra(EXTRA_NAV, navKey)
+            putExtra(EXTRA_REPO_ID, repoId)
         }
         val pendingFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -146,7 +157,11 @@ class NotificationPublisherImpl @Inject constructor(
 
     companion object {
         const val EXTRA_NAV: String = "nav"
+        const val EXTRA_REPO_ID: String = "repo_id"
         const val NAV_AUDIT: String = "audit"
         const val NAV_RESUME: String = "resume"
+
+        /** SPEC §5.1 Iteration 3 (P0-5): conflict-screen deep link key. */
+        const val NAV_CONFLICT: String = "conflict"
     }
 }

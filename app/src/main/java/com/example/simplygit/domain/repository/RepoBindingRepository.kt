@@ -45,6 +45,19 @@ interface RepoBindingRepository {
 
     suspend fun saveVault(treeUri: String, absPath: String)
     suspend fun saveRemote(url: String)
+
+    /**
+     * SPEC §4.4.3 / §6.1 Iteration 3: persist the auth dispatch tuple so the
+     * next sync dispatches through [com.example.simplygit.data.git.JGitDataSource]'s
+     * `applyAuth` to either PAT or SSH.
+     *
+     * Invariants enforced by the implementation:
+     *  - [authType] must be `"PAT"` or `"SSH"`.
+     *  - [authRef] must be `"github_pat"` when [authType] == `"PAT"` (N4
+     *    single-PAT slot) and `"ssh_<keyId>"` when [authType] == `"SSH"`.
+     */
+    suspend fun saveAuth(authType: String, authRef: String)
+
     suspend fun clear()
 
     companion object {
