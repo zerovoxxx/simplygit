@@ -416,6 +416,16 @@ class HomeViewModel @Inject constructor(
     /**
      * 手动操作成功后写审计：按 op 类型映射到合适的 [SyncResult] 与统计字段。
      * 不动 `syncState`（维持 I-7 状态机独立性）。
+     *
+     * Fix bug_report_20260503 "审计统计恒为 0": the previous implementation
+     * hard-coded `filesChanged = 0` and `commitsPushed = 1 if PUSH else 0`,
+     * so the "同步审计" page always showed `pulled 0 / pushed 0 / files 0`
+     * for manual ops. We now route each op to its real payload:
+     *  - PULL  → [PullOutcome.commitsPulled]
+     *  - COMMIT → [CommitOutcome.filesChanged] (0 after the fix means clean
+     *             working tree — shouldn't normally land here, but safe)
+     *  - PUSH  → [PushOutcome.commitsPushed] (0 = remote was already up-to-date)
+     *  - CLONE → no statistics
      */
     private suspend fun finishManualLogSuccess(
         logId: Long?,
@@ -423,15 +433,29 @@ class HomeViewModel @Inject constructor(
         payload: Any?,
     ) {
         if (logId == null) return
-        val pullOutcome = payload as? PullOutcome
+        val commitsPulled = if (op == GitOp.PULL) {
+            (payload as? PullOutcome)?.commitsPulled ?: 0
+        } else {
+            0
+        }
+        val commitsPushed = if (op == GitOp.PUSH) {
+            (payload as? com.example.simplygit.domain.model.PushOutcome)?.commitsPushed ?: 0
+        } else {
+            0
+        }
+        val filesChanged = if (op == GitOp.COMMIT) {
+            (payload as? com.example.simplygit.domain.model.CommitOutcome)?.filesChanged ?: 0
+        } else {
+            0
+        }
         runCatching {
             syncLogRepo.finishLog(
                 logId = logId,
                 result = SyncResult.OK,
                 endedAt = Instant.now(),
-                commitsPulled = if (op == GitOp.PULL) (pullOutcome?.commitsPulled ?: 0) else 0,
-                commitsPushed = if (op == GitOp.PUSH) 1 else 0,
-                filesChanged = 0,
+                commitsPulled = commitsPulled,
+                commitsPushed = commitsPushed,
+                filesChanged = filesChanged,
             )
         }
     }

@@ -37,14 +37,20 @@ internal class GitRepositoryImpl @Inject constructor(
     ): GitOpResult =
         jgit.commitAll(File(binding.localAbsPath), message, authorName, authorEmail)
             .fold(
-                onSuccess = { GitOpResult.Success },
+                // Fix bug_report_20260503 "审计统计恒为 0": propagate filesChanged
+                // so the manual-Commit audit row (HomeViewModel) reports truth
+                // instead of hard-coded 0.
+                onSuccess = { GitOpResult.SuccessWithPayload(GitOp.COMMIT, it) },
                 onFailure = { GitOpResult.Failure(GitOp.COMMIT, it) },
             )
 
     override suspend fun push(binding: RepoBinding, username: String, pat: CharArray): GitOpResult =
         jgit.push(File(binding.localAbsPath), username, pat)
             .fold(
-                onSuccess = { GitOpResult.Success },
+                // Fix bug_report_20260503: propagate commitsPushed so manual-Push
+                // audit rows reflect whether we actually advanced the remote
+                // (up-to-date → 0, fresh commits → N).
+                onSuccess = { GitOpResult.SuccessWithPayload(GitOp.PUSH, it) },
                 onFailure = { GitOpResult.Failure(GitOp.PUSH, it) },
             )
 

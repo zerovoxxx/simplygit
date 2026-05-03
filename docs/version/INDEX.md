@@ -28,3 +28,4 @@
 | 2026-05-03 | v2.3 | AI | fix(app)：闭环 p16x 扫描 5 条 BUG（HomeVM 异常兜底 / FileTree 优先级 / ResolveConflict TOFU / Auth 空密钥 / Export retention），10 文件 +630/-49；详见 bug_report_p16x。 |
 | 2026-05-03 | v2.4 | AI | fix(app)：发布签名与认证选择修复（5 文件 / +55/-24），v1.0.0 arm64；详见 git log。 |
 | 2026-05-03 | v2.5 | AI | fix(app)：首页 Clone 时绑定只读区清空（HomeVM boundSnapshot）+ 关于版块 + FLAG_SECURE 解除 + Push 按钮换行修复，发布 v1.0.3（6 文件 +115/-20）。 |
+| 2026-05-03 | v2.6 | AI | fix(app)：修复同步审计统计恒为 0（8 文件 +152/-34），commitAll/push 返回 DTO 带真实 filesChanged/commitsPushed，发布 v1.0.4；新增反模式 P14。 |

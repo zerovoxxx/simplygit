@@ -170,30 +170,37 @@ class RunSyncUseCase @Inject constructor(
 
             // (7) Push. This method returns GitOpResult instead of throwing;
             // never ignore it or the audit row can incorrectly report OK.
-            when (val pushResult = gitRepo.push(binding, identity.username, pat)) {
-                GitOpResult.Success -> Unit
-                is GitOpResult.SuccessWithPayload -> {
-                    val sanitized = jgitExceptionSanitizer.sanitize(
-                        IllegalStateException("push returned unexpected payload"),
-                    )
-                    return handleSanitized(repoId, logId, sanitized)
+            //
+            // Fix bug_report_20260503: `GitRepositoryImpl.push` now returns
+            // `SuccessWithPayload(PushOutcome)` on success — treat it as a
+            // first-class success branch (previously it was folded into the
+            // "unexpected payload" error path).
+            val pushOutcome: com.example.simplygit.domain.model.PushOutcome? =
+                when (val pushResult = gitRepo.push(binding, identity.username, pat)) {
+                    GitOpResult.Success -> null
+                    is GitOpResult.SuccessWithPayload ->
+                        pushResult.payload as? com.example.simplygit.domain.model.PushOutcome
+                    is GitOpResult.Failure -> {
+                        val sanitized = pushResult.cause as? SanitizedGitException
+                            ?: jgitExceptionSanitizer.sanitize(pushResult.cause)
+                        diagnostics.logGitOpFailure("SYNC_PUSH", sanitized)
+                        return handleSanitized(repoId, logId, sanitized)
+                    }
                 }
-                is GitOpResult.Failure -> {
-                    val sanitized = pushResult.cause as? SanitizedGitException
-                        ?: jgitExceptionSanitizer.sanitize(pushResult.cause)
-                    diagnostics.logGitOpFailure("SYNC_PUSH", sanitized)
-                    return handleSanitized(repoId, logId, sanitized)
-                }
-            }
 
             // (8) Persist + prune.
             val endedAt = Instant.now(clock)
+            // Fix bug_report_20260503: surface the real `commitsPushed` from
+            // JGit's RemoteRefUpdate walk instead of the old
+            // "1 if local commit created else 0" approximation. A local commit
+            // may push to an up-to-date remote (0) and a no-op push may still
+            // succeed (also 0) — now faithfully reported.
             syncLogRepo.finishLog(
                 logId = logId,
                 result = SyncResult.OK,
                 endedAt = endedAt,
                 commitsPulled = pullResult.commitsPulled,
-                commitsPushed = if (commit != null) 1 else 0,
+                commitsPushed = pushOutcome?.commitsPushed ?: (if (commit != null) 1 else 0),
                 filesChanged = commit?.filesChanged ?: 0,
             )
             syncLogRepo.updateSyncState(repoId, SyncState.IDLE)

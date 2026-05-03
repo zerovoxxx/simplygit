@@ -190,7 +190,12 @@ class ResolveConflictUseCase @Inject constructor(
             )
         }
 
-        val pushOk = pushResult is GitOpResult.Success
+        // Fix bug_report_20260503: `gitRepository.push` now returns
+        // `SuccessWithPayload(PushOutcome)` instead of plain `Success`; we
+        // must accept both as "pushed cleanly" — treating SuccessWithPayload
+        // as failure would leave the conflict-resolve flow stuck.
+        val pushOk = pushResult is GitOpResult.Success ||
+            pushResult is GitOpResult.SuccessWithPayload
 
         // (6) State wrap-up — truth table.
         val endedAt = Instant.now(clock)
