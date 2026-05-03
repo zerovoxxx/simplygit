@@ -3,9 +3,37 @@ package com.example.simplygit.domain.repository
 import com.example.simplygit.domain.model.RepoBinding
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * UI-facing "部分绑定" 快照：每一步绑定（Vault / Remote / Auth）写进 Room 后
+ * 都应当立刻反映到首页，即使其他字段还是空的。
+ *
+ * [observe] 返回的 [RepoBinding] 仅在 Vault + Remote 都已填写时才会非空（因为
+ * 下游业务把它当作"可以发起 Git 操作"的前置条件）；但 Home UI 要在更早阶段
+ * 就展示"已绑定目录：xxx"、"远程：xxx"，所以这里提供一个**不做完整性过滤**
+ * 的快照。
+ */
+data class RepoBindingPartial(
+    val id: Long,
+    val treeUri: String?,
+    val localAbsPath: String?,
+    val remoteUrl: String?,
+    val authType: String,
+    val authRef: String,
+)
+
 /** SPEC §6.2. */
 interface RepoBindingRepository {
     fun observe(): Flow<RepoBinding?>
+
+    /**
+     * UI-only 观测入口：Vault / Remote 任一已填就会立刻发出一个
+     * [RepoBindingPartial]，不受 "必须三个字段都非空" 的完整性闸门影响。
+     *
+     * 背景（fix）：Iteration 2 的 `toBindingOrNull()` 把 `remoteUrl.isBlank()`
+     * 的行整体映射成 null，导致用户**先选 Vault 再填远程**的正常顺序下，
+     * 选完 Vault 后首页仍然显示 "未绑定 Vault 目录"。
+     */
+    fun observePartial(): Flow<RepoBindingPartial?>
 
     /** @throws IllegalStateException when no binding has been established yet. */
     suspend fun requireCurrent(): RepoBinding

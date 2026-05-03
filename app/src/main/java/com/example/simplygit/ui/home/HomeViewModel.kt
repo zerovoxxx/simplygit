@@ -11,14 +11,18 @@ import androidx.lifecycle.viewModelScope
 import com.example.simplygit.data.git.PullOutcome
 import com.example.simplygit.data.git.SafPermissionRevokedException
 import com.example.simplygit.data.git.SanitizedGitException
+import com.example.simplygit.data.git.JGitExceptionSanitizer
 import com.example.simplygit.data.sync.RepositoryDao
 import com.example.simplygit.domain.model.GitOp
 import com.example.simplygit.domain.model.GitOpResult
 import com.example.simplygit.domain.model.RepositoryStateSnapshot
 import com.example.simplygit.domain.model.SyncPolicyModel
+import com.example.simplygit.domain.model.SyncResult
 import com.example.simplygit.domain.model.SyncState
+import com.example.simplygit.domain.model.SyncTrigger
 import com.example.simplygit.domain.repository.CredentialPublicView
 import com.example.simplygit.domain.repository.CredentialRepository
+import com.example.simplygit.domain.repository.RepoBindingPartial
 import com.example.simplygit.domain.repository.RepoBindingRepository
 import com.example.simplygit.domain.repository.SshKeyRepository
 import com.example.simplygit.domain.repository.SyncLogRepository
@@ -51,6 +55,7 @@ import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.Instant
 import java.util.Arrays
 import javax.inject.Inject
 
@@ -73,6 +78,13 @@ sealed interface HomeIntent {
      * `"SSH"` the ViewModel builds `authRef = "ssh_$keyId"`.
      */
     data class SubmitAuthType(val authType: String, val keyId: String?) : HomeIntent
+
+    /**
+     * User tapped the "解绑" button on the credential section — wipes the
+     * stored GitHub username / email / PAT. The bind form reappears on the
+     * next recomposition because `credentialView` becomes `null`.
+     */
+    data object ClearCredential : HomeIntent
 }
 
 private const val CLIPBOARD_TAG = "simplygit-pat"
@@ -96,6 +108,7 @@ class HomeViewModel @Inject constructor(
     private val pushRepo: PushRepoUseCase,
     private val resumeSync: ResumeFromPauseUseCase,
     private val saveAuthType: SaveAuthTypeUseCase,
+    private val jgitExceptionSanitizer: JGitExceptionSanitizer,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Idle)
@@ -155,8 +168,14 @@ class HomeViewModel @Inject constructor(
         // SPEC §4.5 Iteration 1 + §4.7 Iteration 2:
         // merge binding / credential / sync-state / policy / pending-count /
         // notification-granted / migration-disabled into a single Bound projection.
+        //
+        // 注意：这里使用 [RepoBindingRepository.observePartial] 而不是 observe()，
+        // 因为 observe() 会在 Vault 或 Remote 任一字段为空时整体映射成 null，
+        // 导致用户在"先选 Vault 再填远程"的正常流程中，选完 Vault 后首页仍显示
+        // "未绑定 Vault 目录"。UI 只关心各字段的有无，完整性交给下游 UseCase
+        // （requireCurrent / currentOrNull 走 toBindingOrNull）去把关。
         combine(
-            bindingRepo.observe(),
+            bindingRepo.observePartial(),
             credRepo.observe(),
             syncLogRepo.observeRepoStateOrDefault(),
             syncPolicyRepo.observe(),
@@ -164,7 +183,7 @@ class HomeViewModel @Inject constructor(
             _notificationGranted,
             _migrationDisabled,
         ) { values ->
-            val binding = values[0] as com.example.simplygit.domain.model.RepoBinding?
+            val binding = values[0] as RepoBindingPartial?
             val cred = values[1] as CredentialPublicView?
             val state = values[2] as RepositoryStateSnapshot
             val policy = values[3] as SyncPolicyModel
@@ -227,6 +246,9 @@ class HomeViewModel @Inject constructor(
             HomeIntent.RefreshNotificationPermission ->
                 _notificationGranted.value = NotificationPermissionHelper.isGranted(appContext)
             is HomeIntent.SubmitAuthType -> submitAuthType(intent)
+            HomeIntent.ClearCredential -> viewModelScope.launch {
+                runCatching { credRepo.clear() }
+            }
         }
     }
 
@@ -280,11 +302,39 @@ class HomeViewModel @Inject constructor(
     private fun runOp(op: GitOp, block: suspend () -> GitOpResult) {
         viewModelScope.launch {
             _uiState.value = HomeUiState.Working(op, System.currentTimeMillis())
+
+            // 手动操作审计：在仓库行已存在（repoId > 0）时开一条 `SyncLog`，
+            // `trigger = MANUAL`。SPEC I-7 原本规定"手动按钮不落 SyncLog"，
+            // 但用户反馈在"同步审计"页完全看不到自己主动触发的操作，与直觉
+            // 不符 —— 遂放开这条限制：**只写 SyncLog，不动 `syncState`**，
+            // 状态机独立性仍然由 `RunSyncUseCase` 独占维护。
+            //
+            // Clone 之前通常也已有 binding row（Vault + Remote 已填），因此
+            // 这里不对 op 做白名单过滤；若确实没有 binding row（repoId = 0）
+            // 就跳过审计写入，避免污染 repoId=0 的占位行。
+            val repoIdForAudit = bindingRepo.observePartial().firstOrNull()?.id ?: 0L
+            val manualLogId: Long? = if (repoIdForAudit > 0L) {
+                runCatching {
+                    syncLogRepo.startLog(
+                        repoId = repoIdForAudit,
+                        trigger = SyncTrigger.MANUAL,
+                        now = Instant.now(),
+                    )
+                }.getOrNull()
+            } else {
+                null
+            }
+
             val result = block()
             _uiState.value = when (result) {
-                GitOpResult.Success -> snapshotBound(LastOpSummary(op, successDesc(op, null)))
-                is GitOpResult.SuccessWithPayload ->
+                GitOpResult.Success -> {
+                    finishManualLogSuccess(manualLogId, op, payload = null)
+                    snapshotBound(LastOpSummary(op, successDesc(op, null)))
+                }
+                is GitOpResult.SuccessWithPayload -> {
+                    finishManualLogSuccess(manualLogId, op, payload = result.payload)
                     snapshotBound(LastOpSummary(op, successDesc(op, result.payload)))
+                }
                 is GitOpResult.Failure -> {
                     // SPEC §4.4.2 Iteration 3 (P0-6): TOFU first-connect
                     // bypasses the normal Error state — we surface a confirm
@@ -294,6 +344,18 @@ class HomeViewModel @Inject constructor(
                     val tofu = result.cause as?
                         com.example.simplygit.data.ssh.SshHostKeyFirstConnectException
                     if (tofu != null) {
+                        // TOFU 首连确认本身不应被当作"手动操作失败"记入审计，
+                        // 因为后续用户确认 / 取消会重跑。这里直接 abort 当前
+                        // 审计行（若有）并让重试写一条新的。
+                        if (manualLogId != null) {
+                            runCatching {
+                                syncLogRepo.finishLog(
+                                    logId = manualLogId,
+                                    result = SyncResult.ABORTED,
+                                    endedAt = Instant.now(),
+                                )
+                            }
+                        }
                         _tofuPrompt.value = TofuPrompt(
                             host = tofu.host,
                             fingerprint = tofu.fingerprint,
@@ -301,10 +363,89 @@ class HomeViewModel @Inject constructor(
                         )
                         snapshotBound(last = null)
                     } else {
+                        finishManualLogFailure(manualLogId, result.cause)
                         HomeUiState.Error(op, toErrorKind(result.cause))
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * 手动操作成功后写审计：按 op 类型映射到合适的 [SyncResult] 与统计字段。
+     * 不动 `syncState`（维持 I-7 状态机独立性）。
+     */
+    private suspend fun finishManualLogSuccess(
+        logId: Long?,
+        op: GitOp,
+        payload: Any?,
+    ) {
+        if (logId == null) return
+        val pullOutcome = payload as? PullOutcome
+        runCatching {
+            syncLogRepo.finishLog(
+                logId = logId,
+                result = SyncResult.OK,
+                endedAt = Instant.now(),
+                commitsPulled = if (op == GitOp.PULL) (pullOutcome?.commitsPulled ?: 0) else 0,
+                commitsPushed = if (op == GitOp.PUSH) 1 else 0,
+                filesChanged = 0,
+            )
+        }
+    }
+
+    /**
+     * 手动操作失败后写审计：复用 [JGitExceptionSanitizer] 已产出的
+     * [SanitizedGitException.kind] 做最小分类，与 [RunSyncUseCase] 的错误分派
+     * 保持一致。**不动 `syncState`**、**不更新 `BROKEN` 失败计数的触发逻辑**
+     * —— 但写入的行会被 `recentConsecutiveFailures()` 扫描到，属于预期行为。
+     */
+    private suspend fun finishManualLogFailure(logId: Long?, cause: Throwable) {
+        if (logId == null) return
+        val (result, errMsg, errType) = when (cause) {
+            is SanitizedGitException -> Triple(
+                when (cause.kind) {
+                    com.example.simplygit.data.git.SyncErrorKind.Auth -> SyncResult.AUTH_ERR
+                    com.example.simplygit.data.git.SyncErrorKind.Network -> SyncResult.NETWORK_ERR
+                    com.example.simplygit.data.git.SyncErrorKind.InvalidState,
+                    com.example.simplygit.data.git.SyncErrorKind.Unknown,
+                    -> SyncResult.ABORTED
+                },
+                cause.message,
+                cause.originalType,
+            )
+            is SafPermissionRevokedException -> Triple(
+                SyncResult.FS_ERR,
+                cause.javaClass.simpleName,
+                cause.javaClass.simpleName,
+            )
+            is MissingCredentialException -> Triple(
+                SyncResult.AUTH_ERR,
+                cause.javaClass.simpleName,
+                cause.javaClass.simpleName,
+            )
+            is MissingBindingException -> Triple(
+                SyncResult.ABORTED,
+                cause.javaClass.simpleName,
+                cause.javaClass.simpleName,
+            )
+            else -> {
+                // BUG-003 fix (bug_report_20260503_snao): any Throwable that
+                // slipped past `GitOpPreflight.afterOp`'s sanitizer wrapping
+                // (e.g. a future UseCase forgetting the contract) must still
+                // be redacted before landing in `sync_log.errorMsg` (R8).
+                val sanitized = jgitExceptionSanitizer.sanitize(cause)
+                Triple(SyncResult.ABORTED, sanitized.message, sanitized.originalType)
+            }
+        }
+        runCatching {
+            syncLogRepo.finishLog(
+                logId = logId,
+                result = result,
+                endedAt = Instant.now(),
+                errorMsg = errMsg,
+                errorType = errType,
+            )
         }
     }
 
@@ -351,7 +492,10 @@ class HomeViewModel @Inject constructor(
     }
 
     private suspend fun snapshotBound(last: LastOpSummary?): HomeUiState.Bound {
-        val binding = runCatching { bindingRepo.requireCurrent() }.getOrNull()
+        // 使用 observePartial 而非 requireCurrent：局部绑定（只有 Vault 或只有
+        // Remote）场景下也要能刷新到 UI，不然 dismiss error / 完成手动 op 后
+        // 首页可能回退成"未绑定任何字段"的错觉。
+        val binding = bindingRepo.observePartial().firstOrNull()
         val cred = credRepo.observe().firstOrNull()
         val state = syncLogRepo.observeRepoStateOrDefault().firstOrNull()
             ?: RepositoryStateSnapshot(
@@ -415,7 +559,7 @@ class HomeViewModel @Inject constructor(
 }
 
 private data class HomeBoundSnapshot(
-    val binding: com.example.simplygit.domain.model.RepoBinding?,
+    val binding: RepoBindingPartial?,
     val cred: CredentialPublicView?,
     val syncState: SyncState,
     val intervalMinutes: Int,

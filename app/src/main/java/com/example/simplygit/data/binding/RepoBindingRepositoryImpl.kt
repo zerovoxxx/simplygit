@@ -13,6 +13,7 @@ import com.example.simplygit.data.sync.toEntity
 import com.example.simplygit.domain.model.RepoBinding
 import com.example.simplygit.domain.model.SyncPolicyModel
 import com.example.simplygit.domain.model.SyncState
+import com.example.simplygit.domain.repository.RepoBindingPartial
 import com.example.simplygit.domain.repository.RepoBindingRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -65,6 +66,9 @@ class RepoBindingRepositoryImpl @Inject constructor(
 
     override fun observe(): Flow<RepoBinding?> =
         repoDao.observeFirst().map { it.toBindingOrNull() }
+
+    override fun observePartial(): Flow<RepoBindingPartial?> =
+        repoDao.observeFirst().map { it?.toPartial() }
 
     override suspend fun requireCurrent(): RepoBinding =
         currentOrNull() ?: error("RepoBinding not configured")
@@ -270,3 +274,16 @@ private fun RepositoryEntity?.toBindingOrNull(): RepoBinding? {
         authRef = authRef,
     )
 }
+
+/**
+ * UI-only 投影：允许 Vault / Remote 暂时缺失 —— 这样用户完成某一步绑定后
+ * 首页能立刻展示"已绑定目录"/"远程：xxx"，而不是继续显示"未绑定"。
+ */
+private fun RepositoryEntity.toPartial(): RepoBindingPartial = RepoBindingPartial(
+    id = id,
+    treeUri = localTreeUri.ifBlank { null },
+    localAbsPath = localAbsPath?.ifBlank { null },
+    remoteUrl = remoteUrl.ifBlank { null },
+    authType = authType,
+    authRef = authRef,
+)

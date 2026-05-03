@@ -37,13 +37,22 @@ class SyncPolicyViewModel @Inject constructor(
     val state: StateFlow<SyncPolicyUiState> = _state.asStateFlow()
 
     init {
+        // Seed the permission flag once at construction time; subsequent
+        // refreshes are driven exclusively by `RefreshNotificationPermission`
+        // intents (fired from `ON_RESUME` and from the permission launcher
+        // callback in `SyncPolicyScreen`). Keeping permission state out of
+        // this `onEach` avoids the hotfix Bug #3 where a concurrent policy
+        // emission would overwrite a freshly-granted `true` with a stale
+        // `false` read.
+        _state.value = _state.value.copy(
+            notificationGranted = NotificationPermissionHelper.isGranted(appContext),
+        )
         policyRepo.observe().onEach { policy ->
             _state.value = _state.value.copy(
                 intervalMinutes = policy.intervalMinutes,
                 requireUnmetered = policy.requireUnmetered,
                 requireCharging = policy.requireCharging,
                 commitMessageTemplate = policy.commitMessageTemplate,
-                notificationGranted = NotificationPermissionHelper.isGranted(appContext),
             )
         }.launchIn(viewModelScope)
     }

@@ -70,6 +70,17 @@ class EncryptedCredentialDataSource @Inject constructor(
         copy
     }
 
+    /**
+     * Direct one-shot read used by background sync so we don't register and
+     * immediately unregister a `SharedPreferences` change listener on every
+     * cycle (BUG-008 — bug_report_20260503_snao).
+     */
+    override suspend fun snapshotIdentity(): CredentialPublicView? = withContext(io) {
+        val u = prefs.getString(KEY_USERNAME, null) ?: return@withContext null
+        val e = prefs.getString(KEY_EMAIL, null) ?: return@withContext null
+        CredentialPublicView(u, e)
+    }
+
     override suspend fun clear() {
         withContext(io) {
             prefs.edit()

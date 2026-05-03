@@ -207,6 +207,7 @@ private fun StatusDot(status: GitFileStatus) {
         GitFileStatus.MODIFIED -> Color(0xFFFFB300)
         GitFileStatus.UNTRACKED -> Color(0xFF64B5F6)
         GitFileStatus.STAGED -> Color(0xFF81C784)
+        GitFileStatus.DELETED -> Color(0xFF8E24AA)
         GitFileStatus.CONFLICT -> Color(0xFFE53935)
     }
     Box(

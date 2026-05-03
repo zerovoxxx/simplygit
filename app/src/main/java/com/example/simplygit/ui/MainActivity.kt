@@ -141,7 +141,10 @@ private fun SimplygitNavHost(
             )
         }
         composable(Routes.POLICY) {
-            SyncPolicyScreen(onBack = { navController.popBackStack() })
+            SyncPolicyScreen(
+                onBack = { navController.popBackStack() },
+                onOpenSshKeys = { navController.navigate(Routes.SSH_KEYS) },
+            )
         }
         composable(Routes.AUDIT) {
             SyncAuditScreen(

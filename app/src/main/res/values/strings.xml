@@ -7,7 +7,9 @@
     <string name="section_vault">本地 Vault 目录</string>
     <string name="section_remote">远程仓库</string>
     <string name="section_ops">Git 操作</string>
-    <string name="section_log">状态</string>
+    <!-- section_log 的权威定义见下方 "Status（最近同步结果卡）" 区块；
+         这里不再重复，避免 AAPT 报 "Found item String/section_log more
+         than one time"。 -->
 
     <!-- Credential -->
     <string name="label_username">用户名</string>
@@ -16,6 +18,11 @@
     <string name="hint_email_default">留空则使用 %1$s@users.noreply.github.com</string>
     <string name="action_save_credential">保存凭证</string>
     <string name="action_clear_clipboard">清空剪贴板</string>
+    <string name="action_unbind_credential">解绑</string>
+    <string name="unbind_confirm_title">确认解绑凭证？</string>
+    <string name="unbind_confirm_message">将清除已保存的 GitHub 用户名、邮箱与 PAT，自动同步会因缺少凭证而失败。确认继续？</string>
+    <string name="unbind_confirm_positive">确认解绑</string>
+    <string name="unbind_confirm_negative">取消</string>
     <string name="credential_bound">已绑定 @%1$s</string>
     <string name="credential_missing">未绑定凭证</string>
 
@@ -39,18 +46,36 @@
     <string name="action_push">Push</string>
     <string name="label_commit_message">Commit 信息</string>
 
-    <!-- Status -->
-    <string name="status_idle">空闲</string>
+    <!-- Status（最近同步结果卡） -->
+    <!-- 区块标题 -->
+    <string name="section_log">最近同步结果</string>
+    <string name="status_idle">当前无同步任务</string>
+    <string name="status_idle_subtitle">待手动触发或等待自动同步</string>
+
+    <!-- 进行中 -->
     <string name="status_working">正在执行 %1$s…</string>
-    <string name="status_error">操作失败：%1$s — %2$s</string>
-    <string name="status_success_clone">Clone 成功</string>
-    <string name="status_success_pull">Pull 成功：%1$s</string>
-    <string name="status_success_commit">Commit 成功</string>
-    <string name="status_success_push">Push 成功</string>
-    <!-- SPEC §5.2 / A8: Pull 成功日志核心文案。 -->
-    <string name="status_pulled_commits">pulled %1$d commits</string>
-    <string name="status_pulled_commits_with_status">pulled %1$d commits (%2$s)</string>
-    <string name="action_dismiss_error">关闭错误</string>
+    <string name="status_working_subtitle">请稍候</string>
+
+    <!-- 成功 —— 主标题按操作分 -->
+    <string name="status_success_clone_title">Clone 完成</string>
+    <string name="status_success_pull_title">Pull 完成</string>
+    <string name="status_success_commit_title">Commit 完成</string>
+    <string name="status_success_push_title">Push 完成</string>
+
+    <!-- 成功 —— 副文案 -->
+    <string name="status_success_clone_subtitle">仓库已克隆到本地</string>
+    <string name="status_success_commit_subtitle">已在本地记录一次提交</string>
+    <string name="status_success_push_subtitle">已推送到远端仓库</string>
+
+    <!-- Pull 副文案：按提交数 + 合并方式分档 -->
+    <string name="status_pull_up_to_date">已是最新，无新提交</string>
+    <string name="status_pull_fast_forward">已拉取 %1$d 个新提交</string>
+    <string name="status_pull_merged">已合并 %1$d 个新提交</string>
+    <string name="status_pull_generic">已拉取 %1$d 个新提交</string>
+
+    <!-- 失败 -->
+    <string name="status_error_title">%1$s 失败</string>
+    <string name="action_dismiss_error">关闭</string>
     <string name="error_saf_permission_revoked">Vault 目录的读写权限已被系统回收，请重新选择目录</string>
     <string name="error_missing_credential">尚未保存 GitHub 凭证</string>
     <string name="error_binding_missing">尚未完成仓库绑定（凭证 / 目录 / 远程 URL）</string>
@@ -96,6 +121,9 @@
     <string name="policy_commit_template_preview">预览：%1$s</string>
     <string name="action_save_policy">保存策略</string>
     <string name="policy_notification_warn">通知权限未授予：失败仅以首页 badge 提示，不弹系统通知。</string>
+    <string name="policy_notification_warn_cta_grant">点此授权</string>
+    <string name="policy_notification_warn_cta_settings">去系统设置</string>
+    <string name="policy_section_security">安全与认证</string>
 
     <!-- ========================================================= -->
     <!-- SPEC Iteration 2 — SyncAuditScreen (§4.7). -->
@@ -218,6 +246,7 @@
     <string name="ssh_generated_fingerprint">指纹：%1$s</string>
     <string name="ssh_import_title">导入私钥</string>
     <string name="ssh_import_label">粘贴 OpenSSH 格式私钥（-----BEGIN OPENSSH PRIVATE KEY-----）</string>
+    <string name="ssh_import_passphrase_label">密钥密码（如未加密可留空）</string>
     <string name="ssh_import_submit">导入</string>
     <string name="ssh_error_title">操作失败</string>
     <string name="ssh_error_generate_failed">生成失败，该设备未提供 Ed25519/RSA 密钥生成器</string>

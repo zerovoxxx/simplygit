@@ -96,7 +96,16 @@ internal class GitSshSessionFactoryProvider @Inject constructor(
                 /* provider = */ provider,
             )
             parsed?.toList().orEmpty()
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            // BUG-001 fix (bug_report_20260503_snao): don't swallow silently —
+            // write a sanitized line so an engineer can tell "encrypted key
+            // without passphrase in cache" apart from "corrupt key file".
+            // The root-cause failure still propagates via the transport's own
+            // "no more authentication methods" error upstream.
+            android.util.Log.w(
+                "SimplyGit.SSH",
+                "loadKeyPairs failed keyId=$keyId passPresent=${pass != null} type=${t.javaClass.simpleName}",
+            )
             emptyList()
         } finally {
             java.util.Arrays.fill(privateKey, '\u0000')

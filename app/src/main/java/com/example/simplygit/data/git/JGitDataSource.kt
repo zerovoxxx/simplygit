@@ -144,12 +144,20 @@ internal class JGitDataSource @Inject constructor(
                 git.add().addFilepattern(".").call()
                 val status = git.status().call()
                 if (status.isClean) return@use null
-                val filesChanged = status.added.size +
-                    status.changed.size +
-                    status.modified.size +
-                    status.removed.size +
-                    status.missing.size +
-                    status.untracked.size
+                // BUG-006 fix (bug_report_20260503_snao): take the set **union**
+                // rather than summing `.size`. JGit's status buckets can overlap
+                // in transient states (e.g. a path can sit in both `modified`
+                // and `missing` when the working-tree file is deleted while the
+                // index still shows earlier edits). Summing inflates the audit
+                // count; the deduplicated path set is the honest answer.
+                val filesChanged = (
+                    status.added +
+                        status.changed +
+                        status.modified +
+                        status.removed +
+                        status.missing +
+                        status.untracked
+                    ).size
                 val ident = PersonIdent(authorName, authorEmail)
                 val commit = git.commit()
                     .setMessage(message)

@@ -52,12 +52,16 @@ class SshKeyViewModel @Inject constructor(
         }
     }
 
-    fun importPasted(text: String) {
+    fun importPasted(text: String, passphrase: String = "") {
         if (_uiState.value.loading) return
         _uiState.update { it.copy(loading = true, errorMessageKey = null) }
         viewModelScope.launch {
             val buf = text.toCharArray()
-            val result = runCatching { sshKeyRepository.import(buf, null) }
+            // BUG-001 fix (bug_report_20260503_snao): pass the user-supplied
+            // passphrase (blank → null) into the repository so encrypted
+            // OpenSSH keys can actually be parsed and cached.
+            val passBuf: CharArray? = passphrase.takeIf { it.isNotEmpty() }?.toCharArray()
+            val result = runCatching { sshKeyRepository.import(buf, passBuf) }
             _uiState.update { state ->
                 state.copy(
                     loading = false,
@@ -77,6 +81,7 @@ class SshKeyViewModel @Inject constructor(
             }
             result.getOrNull()?.wipe()
             Arrays.fill(buf, '\u0000')
+            passBuf?.let { Arrays.fill(it, '\u0000') }
         }
     }
 

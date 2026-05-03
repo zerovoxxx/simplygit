@@ -81,7 +81,10 @@ internal class FileTreeRepositoryImpl @Inject constructor(
                     // so write lower priority first then escalate.
                     status.untracked.forEach { put(it, GitFileStatus.UNTRACKED) }
                     status.modified.forEach { put(it, GitFileStatus.MODIFIED) }
-                    status.missing.forEach { put(it, GitFileStatus.MODIFIED) }
+                    // JGit's `missing` means "tracked file gone from working
+                    // tree but not yet `git rm`-ed" — surface it as DELETED so
+                    // the browser row can distinguish "edited" from "removed".
+                    status.missing.forEach { put(it, GitFileStatus.DELETED) }
                     status.added.forEach { put(it, GitFileStatus.STAGED) }
                     status.changed.forEach { put(it, GitFileStatus.STAGED) }
                     status.removed.forEach { put(it, GitFileStatus.STAGED) }
@@ -179,7 +182,8 @@ internal class FileTreeRepositoryImpl @Inject constructor(
     }
 
     private fun priority(s: GitFileStatus): Int = when (s) {
-        GitFileStatus.CONFLICT -> 4
+        GitFileStatus.CONFLICT -> 5
+        GitFileStatus.DELETED -> 4
         GitFileStatus.MODIFIED -> 3
         GitFileStatus.STAGED -> 2
         GitFileStatus.UNTRACKED -> 1

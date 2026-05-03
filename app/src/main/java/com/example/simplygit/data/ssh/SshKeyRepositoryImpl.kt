@@ -66,6 +66,7 @@ import javax.inject.Singleton
 internal class SshKeyRepositoryImpl @Inject constructor(
     private val dataSource: SshKeyDataSource,
     private val repositoryDao: RepositoryDao,
+    private val passphraseCache: SshPassphraseCache,
     @IoDispatcher private val io: CoroutineDispatcher,
     private val clock: Clock,
     @ApplicationContext private val context: Context,
@@ -124,6 +125,11 @@ internal class SshKeyRepositoryImpl @Inject constructor(
             createdAt = clock.millis(),
         )
 
+        // BUG-001 fix (bug_report_20260503_snao): if the imported key is
+        // passphrase-protected, cache it under the freshly minted `keyId` so
+        // the very next Git op can unlock it. Must happen BEFORE the wipe.
+        passphrase?.takeIf { it.isNotEmpty() }?.let { passphraseCache.put(keyId, it) }
+
         Arrays.fill(privateKeyOpenssh, '\u0000')
         Arrays.fill(rawBytes, 0)
         passphrase?.let { Arrays.fill(it, '\u0000') }
@@ -167,6 +173,12 @@ internal class SshKeyRepositoryImpl @Inject constructor(
      * Shared finalisation path: serialise [kp] in OpenSSH private + public
      * format, compute SHA-256 fingerprint, persist through
      * [SshKeyDataSource] and return the short-lived [SshKeyPair] handle.
+     *
+     * BUG-001 fix (bug_report_20260503_snao): if [passphrase] is non-empty we
+     * stash a copy in [SshPassphraseCache] BEFORE wiping the caller's buffer
+     * so the next `Git.open().pull()` can actually unlock the encrypted
+     * private key. Without this the cache is always empty and MINA SSHD
+     * reports "no more authentication methods available".
      */
     private suspend fun persistKeyPair(kp: KeyPair, passphrase: CharArray?): SshKeyPair {
         val keyId = "ssh_${UUID.randomUUID()}"
@@ -181,6 +193,7 @@ internal class SshKeyRepositoryImpl @Inject constructor(
             fingerprintSha256 = fingerprint,
             createdAt = clock.millis(),
         )
+        passphrase?.takeIf { it.isNotEmpty() }?.let { passphraseCache.put(keyId, it) }
         passphrase?.let { Arrays.fill(it, '\u0000') }
         return SshKeyPair(
             keyId = keyId,

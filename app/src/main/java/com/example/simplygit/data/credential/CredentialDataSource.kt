@@ -12,6 +12,15 @@ import kotlinx.coroutines.flow.Flow
 interface CredentialDataSource {
     suspend fun save(username: String, email: String, pat: CharArray)
     fun observe(): Flow<CredentialPublicView?>
+
+    /**
+     * One-shot identity read. Used by the background sync / manual UseCases
+     * that need `username` / `email` without subscribing to change events.
+     * Distinct from [observe] so callers do not pay the cost of registering
+     * and immediately tearing down a `SharedPreferences` change listener
+     * (BUG-008 — bug_report_20260503_snao).
+     */
+    suspend fun snapshotIdentity(): CredentialPublicView?
     suspend fun loadPatOnce(): CharArray?
     suspend fun clear()
 }

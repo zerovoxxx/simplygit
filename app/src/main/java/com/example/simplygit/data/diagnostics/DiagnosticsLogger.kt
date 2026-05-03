@@ -75,7 +75,19 @@ class DiagnosticsLogger @Inject constructor(
             migrateLegacyLogIfNeeded(dir)
             val today = DATE_FMT.format(Date(clock.millis()))
             val file = File(dir, "$LOG_PREFIX$today$LOG_SUFFIX")
-            if (file.length() > DAY_MAX_BYTES) file.writeText("")
+            if (file.length() > DAY_MAX_BYTES) {
+                // BUG-009 fix (bug_report_20260503_snao): keep the most recent
+                // half instead of truncating the whole day. The previous
+                // `file.writeText("")` wiped every pre-crash log line right
+                // when an engineer needed them most.
+                val tailBytes = DAY_MAX_BYTES.toInt() / 2
+                val raw = runCatching { file.readBytes() }.getOrDefault(ByteArray(0))
+                val keep = if (raw.size > tailBytes) {
+                    raw.copyOfRange(raw.size - tailBytes, raw.size)
+                } else raw
+                file.writeBytes(keep)
+                file.appendText("\n--- LOG ROTATED (tail-kept) ---\n")
+            }
             FileWriter(file, /* append = */ true).use { w ->
                 w.append(TS_FMT.format(Date(clock.millis())))
                 w.append(' ')

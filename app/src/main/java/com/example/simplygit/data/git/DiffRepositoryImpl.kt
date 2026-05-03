@@ -22,6 +22,7 @@ import org.eclipse.jgit.lib.ObjectReader
 import org.eclipse.jgit.lib.Repository
 import org.eclipse.jgit.revwalk.RevWalk
 import org.eclipse.jgit.treewalk.CanonicalTreeParser
+import org.eclipse.jgit.treewalk.EmptyTreeIterator
 import org.eclipse.jgit.treewalk.FileTreeIterator
 import org.eclipse.jgit.treewalk.TreeWalk
 import org.eclipse.jgit.treewalk.filter.PathFilter
@@ -85,8 +86,10 @@ internal class DiffRepositoryImpl @Inject constructor(
         path: String,
         source: DiffSource,
     ): DiffOutcome {
-        val headId = repo.resolve("HEAD") ?: return DiffOutcome.Failed(DiffFailure.FILE_MISSING)
-
+        // BUG-004 fix (bug_report_20260503_snao): do NOT bail out on a
+        // detached / empty HEAD here. `scanWorkingVsHead` below already
+        // handles the "no commits yet" case by feeding an `EmptyTreeIterator`
+        // to the DiffFormatter so newly created files still surface as ADDED.
         val out = ByteArrayOutputStream()
         DiffFormatter(out).use { df ->
             df.setRepository(repo)
@@ -120,13 +123,21 @@ internal class DiffRepositoryImpl @Inject constructor(
         df: DiffFormatter,
         path: String,
     ): List<DiffEntry> {
-        val headId = repo.resolve("HEAD") ?: return emptyList()
+        val headId = repo.resolve("HEAD")
         RevWalk(repo).use { rw ->
-            val headTree = rw.parseCommit(headId).tree
             repo.newObjectReader().use { reader ->
-                val headIt = CanonicalTreeParser().apply { reset(reader, headTree) }
+                // BUG-004 fix: when HEAD is absent (freshly `git init` / cloned
+                // empty repo) use an empty tree on the OLD side so every
+                // working-tree file shows up as an ADDED diff instead of
+                // `FILE_MISSING`.
+                val oldIt = if (headId == null) {
+                    EmptyTreeIterator()
+                } else {
+                    val headTree = rw.parseCommit(headId).tree
+                    CanonicalTreeParser().apply { reset(reader, headTree) }
+                }
                 val workIt = FileTreeIterator(repo)
-                return df.scan(headIt, workIt).filter { ent ->
+                return df.scan(oldIt, workIt).filter { ent ->
                     ent.newPath == path || ent.oldPath == path
                 }
             }

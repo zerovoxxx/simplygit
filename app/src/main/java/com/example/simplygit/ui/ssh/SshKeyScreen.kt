@@ -124,9 +124,9 @@ fun SshKeyScreen(
     if (uiState.importDialog) {
         ImportKeyDialog(
             onDismiss = { viewModel.showImportDialog(false) },
-            onSubmit = { text ->
+            onSubmit = { text, passphrase ->
                 viewModel.showImportDialog(false)
-                viewModel.importPasted(text)
+                viewModel.importPasted(text, passphrase)
             },
         )
     }
@@ -183,24 +183,39 @@ private fun GeneratedKeyDialog(preview: GeneratedKeyPreview, onDismiss: () -> Un
 @Composable
 private fun ImportKeyDialog(
     onDismiss: () -> Unit,
-    onSubmit: (String) -> Unit,
+    onSubmit: (text: String, passphrase: String) -> Unit,
 ) {
     var text by remember { mutableStateOf("") }
+    var passphrase by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.ssh_import_title)) },
         text = {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                label = { Text(stringResource(R.string.ssh_import_label)) },
-                modifier = Modifier.fillMaxWidth().height(160.dp),
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it },
+                    label = { Text(stringResource(R.string.ssh_import_label)) },
+                    modifier = Modifier.fillMaxWidth().height(160.dp),
+                )
+                // BUG-001 fix (bug_report_20260503_snao): accept an optional
+                // passphrase so encrypted OpenSSH private keys can be
+                // imported + unlocked in one shot. Blank = no passphrase.
+                OutlinedTextField(
+                    value = passphrase,
+                    onValueChange = { passphrase = it },
+                    label = { Text(stringResource(R.string.ssh_import_passphrase_label)) },
+                    singleLine = true,
+                    visualTransformation = androidx.compose.ui.text.input
+                        .PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         },
         confirmButton = {
             TextButton(
                 enabled = text.contains("BEGIN OPENSSH PRIVATE KEY"),
-                onClick = { onSubmit(text) },
+                onClick = { onSubmit(text, passphrase) },
             ) { Text(stringResource(R.string.ssh_import_submit)) }
         },
         dismissButton = {

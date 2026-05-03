@@ -1,6 +1,8 @@
 package com.example.simplygit.domain.usecase
 
 import com.example.simplygit.data.diagnostics.DiagnosticsLogger
+import com.example.simplygit.data.git.JGitExceptionSanitizer
+import com.example.simplygit.data.git.SanitizedGitException
 import com.example.simplygit.data.git.SyncErrorKind
 import com.example.simplygit.domain.model.ConflictClass
 import com.example.simplygit.domain.model.GitOpResult
@@ -55,6 +57,7 @@ class ResolveConflictUseCase @Inject constructor(
     private val syncLogRepository: SyncLogRepository,
     private val clearConflictPauseUseCase: ClearConflictPauseUseCase,
     private val diagnosticsLogger: DiagnosticsLogger,
+    private val jgitExceptionSanitizer: JGitExceptionSanitizer,
     private val clock: Clock,
 ) {
     suspend operator fun invoke(req: ResolveRequest): ResolveResult {
@@ -118,14 +121,20 @@ class ResolveConflictUseCase @Inject constructor(
                 authorEmail = identity.email,
             )
         }.getOrElse { t ->
+            // BUG-002 fix (bug_report_20260503_snao): `commitResolved` already
+            // sanitizes internally, but defensively re-wrap anything else so
+            // `errorMsg` / `errorType` never expose raw `javaClass.simpleName`
+            // and the UI can map `kind` back onto a localised message (R8).
+            val sanitized = t as? SanitizedGitException
+                ?: jgitExceptionSanitizer.sanitize(t)
             syncLogRepository.finishLog(
                 logId = logId,
                 result = SyncResult.ABORTED,
                 endedAt = Instant.now(clock),
-                errorMsg = t.javaClass.simpleName,
-                errorType = t.javaClass.simpleName,
+                errorMsg = sanitized.message,
+                errorType = sanitized.originalType,
             )
-            return ResolveResult.PartialFailure(nonSkip.keys.toList(), SyncErrorKind.Unknown)
+            return ResolveResult.PartialFailure(nonSkip.keys.toList(), sanitized.kind)
         }
 
         // (5) Push.

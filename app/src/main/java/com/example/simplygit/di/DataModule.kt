@@ -9,7 +9,6 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
-import androidx.security.crypto.MasterKeys
 import com.example.simplygit.data.binding.RepoBindingRepositoryImpl
 import com.example.simplygit.data.credential.CredentialDataSource
 import com.example.simplygit.data.credential.CredentialRepositoryImpl
@@ -79,14 +78,14 @@ object DataModule {
     private fun createWithLegacyMasterKeys(ctx: Context): SharedPreferences {
         // Recreate the AES-256-GCM key spec MasterKeys.getOrCreate expects.
         val spec = KeyGenParameterSpec.Builder(
-            MasterKeys.AES256_GCM_SPEC.keystoreAlias,
+            androidx.security.crypto.MasterKeys.AES256_GCM_SPEC.keystoreAlias,
             KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
         )
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
             .setKeySize(KEY_SIZE_BITS)
             .build()
-        val alias = MasterKeys.getOrCreate(spec)
+        val alias = androidx.security.crypto.MasterKeys.getOrCreate(spec)
         return EncryptedSharedPreferences.create(
             ENCRYPTED_PREFS,
             alias,
