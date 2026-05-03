@@ -50,9 +50,24 @@ object NotificationPermissionHelper {
     fun isPermanentlyDenied(activity: Activity): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return false
         if (isGranted(activity)) return false
+        if (!wasRequested(activity)) return false
         return !ActivityCompat.shouldShowRequestPermissionRationale(
             activity,
             Manifest.permission.POST_NOTIFICATIONS,
         )
     }
+
+    fun markRequested(context: Context) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putBoolean(KEY_REQUESTED, true)
+            .apply()
+    }
+
+    private fun wasRequested(context: Context): Boolean =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_REQUESTED, false)
+
+    private const val PREFS_NAME = "notification_permission"
+    private const val KEY_REQUESTED = "post_notifications_requested"
 }

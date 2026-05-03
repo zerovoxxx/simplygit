@@ -107,13 +107,21 @@ class GitOpPreflight @Inject constructor(
  *
  * Returns [GitOpResult.Failure] with [MissingCredentialException] when no PAT exists.
  */
-private suspend inline fun runWithPat(
+private suspend inline fun runWithAuth(
+    binding: RepoBinding,
     credRepo: CredentialRepository,
     op: GitOp,
     block: (pat: CharArray) -> GitOpResult,
 ): GitOpResult {
-    val pat = credRepo.loadPatOnce()
-        ?: return GitOpResult.Failure(op, MissingCredentialException())
+    val pat = when (binding.authType) {
+        "PAT" -> credRepo.loadPatOnce()
+            ?: return GitOpResult.Failure(op, MissingCredentialException())
+        "SSH" -> CharArray(0)
+        else -> return GitOpResult.Failure(
+            op,
+            IllegalStateException("unknown authType=${binding.authType}"),
+        )
+    }
     return try {
         block(pat)
     } finally {
@@ -130,7 +138,7 @@ class CloneRepoUseCase @Inject constructor(
     suspend operator fun invoke(): GitOpResult {
         val ready = preflight.prepare(GitOp.CLONE)
             .getOrElse { return GitOpResult.Failure(GitOp.CLONE, it) }
-        val result = runWithPat(credRepo, GitOp.CLONE) { pat ->
+        val result = runWithAuth(ready.binding, credRepo, GitOp.CLONE) { pat ->
             gitRepo.clone(ready.binding, ready.credential.username, pat)
         }
         return preflight.afterOp(GitOp.CLONE, result)
@@ -145,7 +153,7 @@ class PullRepoUseCase @Inject constructor(
     suspend operator fun invoke(): GitOpResult {
         val ready = preflight.prepare(GitOp.PULL)
             .getOrElse { return GitOpResult.Failure(GitOp.PULL, it) }
-        val result = runWithPat(credRepo, GitOp.PULL) { pat ->
+        val result = runWithAuth(ready.binding, credRepo, GitOp.PULL) { pat ->
             gitRepo.pull(ready.binding, ready.credential.username, pat)
         }
         return preflight.afterOp(GitOp.PULL, result)
@@ -160,7 +168,7 @@ class PushRepoUseCase @Inject constructor(
     suspend operator fun invoke(): GitOpResult {
         val ready = preflight.prepare(GitOp.PUSH)
             .getOrElse { return GitOpResult.Failure(GitOp.PUSH, it) }
-        val result = runWithPat(credRepo, GitOp.PUSH) { pat ->
+        val result = runWithAuth(ready.binding, credRepo, GitOp.PUSH) { pat ->
             gitRepo.push(ready.binding, ready.credential.username, pat)
         }
         return preflight.afterOp(GitOp.PUSH, result)

@@ -75,6 +75,8 @@ class MainActivity : ComponentActivity() {
                     onNavConsumed = {
                         pendingNav = null
                         pendingNavRepoId = null
+                        intent?.removeExtra(NotificationPublisherImpl.EXTRA_NAV)
+                        intent?.removeExtra(NotificationPublisherImpl.EXTRA_REPO_ID)
                     },
                 )
             }
@@ -121,7 +123,10 @@ private fun SimplygitNavHost(
     androidx.compose.runtime.LaunchedEffect(pendingNav, pendingNavRepoId) {
         when (pendingNav) {
             NotificationPublisherImpl.NAV_AUDIT -> navController.navigate(Routes.AUDIT)
-            NotificationPublisherImpl.NAV_RESUME -> Unit // stay on Home; banner surfaces the "Resume" button.
+            NotificationPublisherImpl.NAV_RESUME -> navController.navigate(Routes.HOME) {
+                popUpTo(Routes.HOME) { inclusive = false }
+                launchSingleTop = true
+            }
             NotificationPublisherImpl.NAV_CONFLICT -> {
                 val repoId = pendingNavRepoId ?: return@LaunchedEffect
                 if (repoId > 0L) navController.navigate(Routes.conflict(repoId))

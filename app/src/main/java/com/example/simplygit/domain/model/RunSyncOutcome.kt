@@ -12,6 +12,7 @@ sealed interface RunSyncOutcome {
     data object Ok : RunSyncOutcome
     data object SkippedDebounce : RunSyncOutcome
     data class SkippedPaused(val state: SyncState) : RunSyncOutcome
+    data object SkippedRunning : RunSyncOutcome
     data object NoBinding : RunSyncOutcome
     data object MissingCredential : RunSyncOutcome
     data object NetworkErr : RunSyncOutcome

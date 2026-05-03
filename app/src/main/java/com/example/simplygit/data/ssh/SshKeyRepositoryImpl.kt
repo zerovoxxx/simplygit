@@ -152,6 +152,7 @@ internal class SshKeyRepositoryImpl @Inject constructor(
         } else emptyList()
         if (references.isNotEmpty()) return DeleteSshKeyOutcome.InUse(references)
         dataSource.delete(keyId)
+        passphraseCache.remove(keyId)
         return DeleteSshKeyOutcome.Deleted
     }
 

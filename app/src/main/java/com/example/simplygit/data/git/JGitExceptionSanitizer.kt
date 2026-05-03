@@ -73,6 +73,7 @@ class JGitExceptionSanitizer @Inject constructor() {
         var depth = 0
         val seen = HashSet<Throwable>()
         while (current != null && depth < MAX_DEPTH && seen.add(current)) {
+            if (isAuthFailureMessage(current.message.orEmpty())) return SyncErrorKind.Auth
             when (current) {
                 is SshHostKeyChangedException -> return SyncErrorKind.Auth
                 is ConflictResolutionFailedException,
@@ -80,10 +81,7 @@ class JGitExceptionSanitizer @Inject constructor() {
                 -> return SyncErrorKind.Unknown
                 is TransportException -> {
                     val msg = current.message.orEmpty()
-                    if (msg.contains("not authorized", ignoreCase = true) ||
-                        msg.contains("401") ||
-                        msg.contains("403")
-                    ) {
+                    if (isAuthFailureMessage(msg)) {
                         return SyncErrorKind.Auth
                     }
                 }
@@ -97,6 +95,19 @@ class JGitExceptionSanitizer @Inject constructor() {
             depth++
         }
         return SyncErrorKind.Unknown
+    }
+
+    private fun isAuthFailureMessage(message: String): Boolean {
+        val lower = message.lowercase()
+        return lower.contains("not authorized") ||
+            lower.contains("401") ||
+            lower.contains("403") ||
+            lower.contains("permission denied") ||
+            lower.contains("publickey") ||
+            lower.contains("no more authentication methods") ||
+            lower.contains("auth fail") ||
+            lower.contains("authentication failed") ||
+            lower.contains("passphrase")
     }
 
     /** Public helper so non-throwable text (e.g. raw messages) can go through the same filter. */

@@ -36,6 +36,11 @@ class CredentialRepositoryImpl @Inject constructor(
         dataSource.save(username, effectiveEmail, pat)
     }
 
+    override suspend fun saveIdentity(username: String, email: String) {
+        val effectiveEmail = email.ifBlank { "$username@users.noreply.github.com" }
+        dataSource.saveIdentity(username, effectiveEmail)
+    }
+
     override suspend fun loadPatOnce(): CharArray? = dataSource.loadPatOnce()
 
     override suspend fun clear() = dataSource.clear()

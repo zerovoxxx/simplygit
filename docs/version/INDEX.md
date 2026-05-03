@@ -24,3 +24,4 @@
 | 2026-05-03 | v1.9 | alexjhwen | 迭代 3 Spec v1.1 修订完成，闭环 5 P0 + 7 P1 + 1 P2 共 13 个问题（核心：挂载点全部回归现有 `GitRepository/SyncLogRepository/HomeScreen/MainActivity`；新增 `ClearConflictPauseUseCase + SyncResult.CONFLICT_RESOLVED` 表达冲突解决语义；Migration v2→v3 追加 `ALTER repository ADD COLUMN auth_type`；通知新增 `NAV_CONFLICT + EXTRA_REPO_ID` 路由；`CredentialRepository` 不扩展，SSH 走独立 `SshKeyRepository`；Skip × Push 6 行真值表；`SshPassphraseCache` `@ApplicationScope`；删除 `DiffSource.COMMIT_VS_COMMIT` 冗余），状态流转为"评审完成（待开发）"。 |
 | 2026-05-03 | v2.0 | alexjhwen | feat(iter3)：冲突可视化全量交付（4 Phase / 72 文件 / +5750），SSH 链路 CR 11 问题闭环后 Spec v1.3 → ✅；详见 SPEC §10。 |
 | 2026-05-03 | v2.1 | alexjhwen | fix(app)：同步链路与首页交互缺陷修复（39 文件 / +1543），新增 BUG 审查报告。 |
+| 2026-05-03 | v2.2 | AI | fix(sync)：后台同步/SSH 缺陷修复（8 BUG），补审查报告；详见 bug_report_y7b0。 |

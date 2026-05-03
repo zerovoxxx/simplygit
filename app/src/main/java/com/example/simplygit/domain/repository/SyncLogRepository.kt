@@ -28,6 +28,13 @@ interface SyncLogRepository {
     suspend fun loadById(id: Long): SyncLogModel?
     suspend fun loadRepoState(repoId: Long): RepositoryStateSnapshot
     suspend fun startLog(repoId: Long, trigger: SyncTrigger, now: Instant): Long
+
+    /**
+     * Atomically transitions IDLE -> RUNNING and creates the audit row.
+     * Returns null when another worker has already claimed the repository.
+     */
+    suspend fun tryStartRun(repoId: Long, trigger: SyncTrigger, now: Instant): Long?
+
     suspend fun finishLog(
         logId: Long,
         result: SyncResult,

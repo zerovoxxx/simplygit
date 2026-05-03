@@ -7,6 +7,7 @@ import com.example.simplygit.data.git.SanitizedGitException
 import com.example.simplygit.data.git.SyncErrorKind
 import com.example.simplygit.data.saf.SafPathResolver
 import com.example.simplygit.domain.model.ConflictClass
+import com.example.simplygit.domain.model.GitOpResult
 import com.example.simplygit.domain.model.PAUSED_STATES
 import com.example.simplygit.domain.model.RunSyncOutcome
 import com.example.simplygit.domain.model.SyncPolicyModel
@@ -73,14 +74,23 @@ class RunSyncUseCase @Inject constructor(
         val repoId = binding.id
         val snapshot = syncLogRepo.loadRepoState(repoId)
 
-        // (1) Pause gate.
+        // (1) Pause / in-flight gate.
         if (snapshot.syncState in PAUSED_STATES) {
             return RunSyncOutcome.SkippedPaused(snapshot.syncState)
         }
+        if (snapshot.syncState == SyncState.RUNNING) {
+            return RunSyncOutcome.SkippedRunning
+        }
 
         val now = Instant.now(clock)
-        val logId = syncLogRepo.startLog(repoId, trigger, now)
-        syncLogRepo.updateSyncState(repoId, SyncState.RUNNING)
+        val logId = syncLogRepo.tryStartRun(repoId, trigger, now) ?: run {
+            val latest = syncLogRepo.loadRepoState(repoId).syncState
+            return if (latest in PAUSED_STATES) {
+                RunSyncOutcome.SkippedPaused(latest)
+            } else {
+                RunSyncOutcome.SkippedRunning
+            }
+        }
 
         var pat: CharArray? = null
         return try {
@@ -109,7 +119,8 @@ class RunSyncUseCase @Inject constructor(
                 return RunSyncOutcome.SkippedDebounce
             }
 
-            // (4) Identity + PAT.
+            // (4) Identity + auth buffer. PAT mode requires a PAT; SSH mode
+            // passes an empty placeholder because JGitDataSource dispatches on authType.
             val identity = credRepo.snapshotIdentity() ?: run {
                 syncLogRepo.pauseAndFinish(
                     repoId = repoId,
@@ -121,7 +132,7 @@ class RunSyncUseCase @Inject constructor(
                 notifier.publishAuthFailed(repoId)
                 return RunSyncOutcome.MissingCredential
             }
-            pat = credRepo.loadPatOnce() ?: run {
+            pat = loadAuthBuffer(binding) ?: run {
                 syncLogRepo.pauseAndFinish(
                     repoId = repoId,
                     logId = logId,
@@ -157,8 +168,23 @@ class RunSyncUseCase @Inject constructor(
                 authorEmail = identity.email,
             )
 
-            // (7) Push.
-            gitRepo.push(binding, identity.username, pat)
+            // (7) Push. This method returns GitOpResult instead of throwing;
+            // never ignore it or the audit row can incorrectly report OK.
+            when (val pushResult = gitRepo.push(binding, identity.username, pat)) {
+                GitOpResult.Success -> Unit
+                is GitOpResult.SuccessWithPayload -> {
+                    val sanitized = jgitExceptionSanitizer.sanitize(
+                        IllegalStateException("push returned unexpected payload"),
+                    )
+                    return handleSanitized(repoId, logId, sanitized)
+                }
+                is GitOpResult.Failure -> {
+                    val sanitized = pushResult.cause as? SanitizedGitException
+                        ?: jgitExceptionSanitizer.sanitize(pushResult.cause)
+                    diagnostics.logGitOpFailure("SYNC_PUSH", sanitized)
+                    return handleSanitized(repoId, logId, sanitized)
+                }
+            }
 
             // (8) Persist + prune.
             val endedAt = Instant.now(clock)
@@ -253,6 +279,13 @@ class RunSyncUseCase @Inject constructor(
         }
         return outcome
     }
+
+    private suspend fun loadAuthBuffer(binding: com.example.simplygit.domain.model.RepoBinding): CharArray? =
+        when (binding.authType) {
+            "PAT" -> credRepo.loadPatOnce()
+            "SSH" -> CharArray(0)
+            else -> throw IllegalStateException("unknown authType=${binding.authType}")
+        }
 
     private fun buildCommitMessage(policy: SyncPolicyModel): String {
         val iso = ISO_FMT.format(Instant.now(clock))

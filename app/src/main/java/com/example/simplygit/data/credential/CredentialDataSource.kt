@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.Flow
  */
 interface CredentialDataSource {
     suspend fun save(username: String, email: String, pat: CharArray)
+    suspend fun saveIdentity(username: String, email: String)
     fun observe(): Flow<CredentialPublicView?>
 
     /**

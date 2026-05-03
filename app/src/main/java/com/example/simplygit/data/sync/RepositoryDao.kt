@@ -37,6 +37,9 @@ interface RepositoryDao {
     @Query("UPDATE repository SET syncState = :state WHERE id = :id")
     suspend fun updateSyncState(id: Long, state: String)
 
+    @Query("UPDATE repository SET syncState = :nextState WHERE id = :id AND syncState = :expectedState")
+    suspend fun compareAndSetSyncState(id: Long, expectedState: String, nextState: String): Int
+
     @Query(
         """
         UPDATE repository

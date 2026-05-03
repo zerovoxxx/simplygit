@@ -163,6 +163,7 @@ fun HomeScreen(
 
             CredentialSection(
                 username = credView?.username,
+                authType = bound?.authType ?: "PAT",
                 onSubmit = { u, e, pat -> viewModel.onIntent(HomeIntent.SubmitCredential(u, e, pat)) },
                 onClearClipboard = { viewModel.clearClipboardNow() },
                 onUnbind = { viewModel.onIntent(HomeIntent.ClearCredential) },
@@ -352,6 +353,7 @@ private fun bannerColorAndText(bound: HomeUiState.Bound): Pair<Color, String> = 
 @Composable
 private fun CredentialSection(
     username: String?,
+    authType: String,
     onSubmit: (String, String, CharArray) -> Unit,
     onClearClipboard: () -> Unit,
     onUnbind: () -> Unit,
@@ -434,7 +436,7 @@ private fun CredentialSection(
     )
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(
-            enabled = u.isNotBlank() && pat.isNotBlank(),
+            enabled = u.isNotBlank() && (authType == "SSH" || pat.isNotBlank()),
             onClick = {
                 val buf = pat.toCharArray()
                 pat = ""
@@ -510,6 +512,10 @@ private fun VaultSection(
         )
         SafResolveUiState.NotReadable -> Text(
             text = stringResource(R.string.vault_not_readable),
+            color = Color.Red,
+        )
+        SafResolveUiState.PermissionNotPersisted -> Text(
+            text = stringResource(R.string.vault_permission_not_persisted),
             color = Color.Red,
         )
         else -> Unit

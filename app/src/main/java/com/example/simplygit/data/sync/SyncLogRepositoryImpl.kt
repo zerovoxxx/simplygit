@@ -57,6 +57,25 @@ class SyncLogRepositoryImpl @Inject constructor(
             ),
         )
 
+    override suspend fun tryStartRun(repoId: Long, trigger: SyncTrigger, now: Instant): Long? =
+        db.withTransaction {
+            val claimed = repoDao.compareAndSetSyncState(
+                id = repoId,
+                expectedState = SyncState.IDLE.name,
+                nextState = SyncState.RUNNING.name,
+            )
+            if (claimed != 1) return@withTransaction null
+            logDao.insert(
+                SyncLogEntity(
+                    repoId = repoId,
+                    startedAt = now.toEpochMilli(),
+                    endedAt = null,
+                    trigger = trigger.name,
+                    result = null,
+                ),
+            )
+        }
+
     override suspend fun finishLog(
         logId: Long,
         result: SyncResult,

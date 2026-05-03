@@ -31,6 +31,7 @@
     <string name="vault_bound">已绑定目录：%1$s</string>
     <string name="vault_not_primary">该目录所在存储分区不被 JGit 直连支持，请选择内置存储 /sdcard/Documents 下的目录</string>
     <string name="vault_not_readable">该目录当前无读写权限（可能位于 Android/data 等受限位置），请选择内置存储 Documents 下的目录</string>
+    <string name="vault_permission_not_persisted">目录授权未能持久保存，请重新选择并确认读写授权</string>
     <string name="vault_missing">未绑定 Vault 目录</string>
 
     <!-- Remote -->

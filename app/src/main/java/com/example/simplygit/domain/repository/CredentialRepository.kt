@@ -35,6 +35,7 @@ interface CredentialRepository {
     suspend fun snapshotIdentity(): CredentialIdentity?
 
     suspend fun save(username: String, email: String, pat: CharArray)
+    suspend fun saveIdentity(username: String, email: String)
     suspend fun loadPatOnce(): CharArray?
     suspend fun clear()
 }

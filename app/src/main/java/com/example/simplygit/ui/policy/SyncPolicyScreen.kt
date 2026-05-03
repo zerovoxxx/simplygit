@@ -147,7 +147,10 @@ fun SyncPolicyScreen(
                             context.openAppNotificationSettings()
                         } else {
                             NotificationPermissionHelper.permissionIfNeeded()
-                                ?.let(permissionLauncher::launch)
+                                ?.let { permission ->
+                                    NotificationPermissionHelper.markRequested(context)
+                                    permissionLauncher.launch(permission)
+                                }
                         }
                     },
                 )
@@ -221,7 +224,10 @@ fun SyncPolicyScreen(
                             NotificationPermissionHelper.isPermanentlyDenied(it)
                         } ?: false
                         when {
-                            perm != null && !permanentlyDenied -> permissionLauncher.launch(perm)
+                            perm != null && !permanentlyDenied -> {
+                                NotificationPermissionHelper.markRequested(context)
+                                permissionLauncher.launch(perm)
+                            }
                             permanentlyDenied -> context.openAppNotificationSettings()
                             // else: pre-A13 — permission is implicit.
                         }

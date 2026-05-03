@@ -63,6 +63,7 @@ import javax.inject.Inject
 sealed interface HomeIntent {
     data class SubmitCredential(val username: String, val email: String, val pat: CharArray) : HomeIntent
     data class PickVault(val uri: Uri) : HomeIntent
+    data object PickVaultPermissionFailed : HomeIntent
     data class SubmitRemote(val url: String) : HomeIntent
     data object DoClone : HomeIntent
     data object DoPull : HomeIntent
@@ -233,6 +234,7 @@ class HomeViewModel @Inject constructor(
         when (intent) {
             is HomeIntent.SubmitCredential -> submitCredential(intent)
             is HomeIntent.PickVault -> pickVault(intent.uri)
+            HomeIntent.PickVaultPermissionFailed -> _safState.value = SafResolveUiState.PermissionNotPersisted
             is HomeIntent.SubmitRemote -> viewModelScope.launch {
                 runCatching { bindRemote(intent.url) }
             }
@@ -281,8 +283,12 @@ class HomeViewModel @Inject constructor(
     private fun submitCredential(intent: HomeIntent.SubmitCredential) {
         viewModelScope.launch {
             try {
-                credRepo.save(intent.username.trim(), intent.email.trim(), intent.pat)
-                scheduleClipboardClear()
+                if (intent.pat.isEmpty()) {
+                    credRepo.saveIdentity(intent.username.trim(), intent.email.trim())
+                } else {
+                    credRepo.save(intent.username.trim(), intent.email.trim(), intent.pat)
+                    scheduleClipboardClear()
+                }
             } finally {
                 Arrays.fill(intent.pat, '\u0000')
             }

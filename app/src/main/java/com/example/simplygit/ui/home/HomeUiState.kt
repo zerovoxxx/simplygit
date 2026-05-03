@@ -86,4 +86,5 @@ sealed interface SafResolveUiState {
     data class Bound(val absPath: String) : SafResolveUiState
     data object NotPrimary : SafResolveUiState
     data object NotReadable : SafResolveUiState
+    data object PermissionNotPersisted : SafResolveUiState
 }

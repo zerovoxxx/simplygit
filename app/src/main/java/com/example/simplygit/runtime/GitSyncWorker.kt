@@ -67,6 +67,7 @@ class GitSyncWorker @AssistedInject constructor(
 
             RunSyncOutcome.SkippedDebounce,
             is RunSyncOutcome.SkippedPaused,
+            RunSyncOutcome.SkippedRunning,
             RunSyncOutcome.NoBinding,
             -> Result.success()
 

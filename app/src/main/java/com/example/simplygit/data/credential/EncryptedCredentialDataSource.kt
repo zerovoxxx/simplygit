@@ -36,14 +36,28 @@ class EncryptedCredentialDataSource @Inject constructor(
             // moment. We cannot zero out a String, but we keep its scope minimal.
             val patString = String(pat)
             try {
-                prefs.edit()
+                val editor = prefs.edit()
                     .putString(KEY_USERNAME, username)
                     .putString(KEY_EMAIL, email)
-                    .putString(KEY_PAT, patString)
-                    .apply()
+                if (pat.isEmpty()) {
+                    editor.remove(KEY_PAT)
+                } else {
+                    editor.putString(KEY_PAT, patString)
+                }
+                editor.apply()
             } finally {
                 Arrays.fill(pat, '\u0000')
             }
+        }
+    }
+
+    override suspend fun saveIdentity(username: String, email: String) {
+        withContext(io) {
+            prefs.edit()
+                .putString(KEY_USERNAME, username)
+                .putString(KEY_EMAIL, email)
+                .remove(KEY_PAT)
+                .apply()
         }
     }
 
