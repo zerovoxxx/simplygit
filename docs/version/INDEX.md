@@ -26,3 +26,4 @@
 | 2026-05-03 | v2.1 | alexjhwen | fix(app)：同步链路与首页交互缺陷修复（39 文件 / +1543），新增 BUG 审查报告。 |
 | 2026-05-03 | v2.2 | AI | fix(sync)：后台同步/SSH 缺陷修复（8 BUG），补审查报告；详见 bug_report_y7b0。 |
 | 2026-05-03 | v2.3 | AI | fix(app)：闭环 p16x 扫描 5 条 BUG（HomeVM 异常兜底 / FileTree 优先级 / ResolveConflict TOFU / Auth 空密钥 / Export retention），10 文件 +630/-49；详见 bug_report_p16x。 |
+| 2026-05-03 | v2.4 | AI | fix(app)：发布签名与认证选择修复（5 文件 / +55/-24），v1.0.0 arm64；详见 git log。 |
