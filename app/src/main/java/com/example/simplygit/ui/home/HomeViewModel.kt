@@ -331,7 +331,21 @@ class HomeViewModel @Inject constructor(
                 null
             }
 
-            val result = block()
+            // BUG-001 fix (bug_report_20260503_p16x): guard `block()` with
+            // try/catch so a Throwable escaping the Domain contract (e.g.
+            // `EncryptedSharedPreferences.getString` raising `AEADBadTagException`
+            // when the Android KeyStore is corrupted) does not freeze the UI
+            // in `Working` forever. We preserve `CancellationException` so the
+            // Compose / ViewModel structured-concurrency contract still holds;
+            // everything else degrades into a normal `GitOpResult.Failure` and
+            // reuses the existing sanitizer-backed error pipeline below (R8).
+            val result = try {
+                block()
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (t: Throwable) {
+                GitOpResult.Failure(op, t)
+            }
             _uiState.value = when (result) {
                 GitOpResult.Success -> {
                     finishManualLogSuccess(manualLogId, op, payload = null)

@@ -6,6 +6,7 @@ import com.example.simplygit.domain.model.ResolutionChoice
 import com.example.simplygit.domain.model.ResolveRequest
 import com.example.simplygit.domain.model.ResolveResult
 import com.example.simplygit.domain.repository.ConflictRepository
+import com.example.simplygit.domain.repository.SshKeyRepository
 import com.example.simplygit.domain.usecase.ResolveConflictUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +28,7 @@ import javax.inject.Inject
 class ConflictResolveViewModel @Inject constructor(
     private val conflictRepository: ConflictRepository,
     private val resolveConflict: ResolveConflictUseCase,
+    private val sshKeyRepository: SshKeyRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ConflictResolveUiState())
@@ -73,9 +75,34 @@ class ConflictResolveViewModel @Inject constructor(
                             outcome.failedPaths,
                         )
                         is ResolveResult.Failure -> SubmissionResult.Failed
+                        // BUG-003 fix (bug_report_20260503_p16x): surface a
+                        // TOFU prompt so the user can accept the host key and
+                        // retry the push; the commit itself already landed.
+                        is ResolveResult.NeedsHostKeyConfirmation -> SubmissionResult.HostKeyNeeded(
+                            host = outcome.host,
+                            fingerprint = outcome.fingerprint,
+                            committedFiles = outcome.committedFiles,
+                            remainingSkipped = outcome.remainingSkipped,
+                        )
                     },
                 )
             }
+        }
+    }
+
+    /**
+     * BUG-003 fix: called when the user confirms the first-connect host key
+     * surfaced by the push step. Persists the fingerprint through the SSH
+     * key repository and re-enters [submit] so the commit-plus-push path can
+     * finish. On decline the caller simply calls [dismissResult] — the
+     * committed files remain landed locally and the banner stays at
+     * PAUSED_CONFLICT until the next sync or manual retry.
+     */
+    fun confirmHostKey(host: String, fingerprint: String) {
+        viewModelScope.launch {
+            runCatching { sshKeyRepository.acceptHostKey(host, fingerprint) }
+            _uiState.update { it.copy(result = null) }
+            submit()
         }
     }
 

@@ -37,7 +37,7 @@ data class ResolveRequest(
 /**
  * Result returned by `ResolveConflictUseCase` (SPEC §4.3.1 truth table).
  *
- * All legal state transitions are captured by the three variants below.
+ * All legal state transitions are captured by the four variants below.
  */
 sealed interface ResolveResult {
     /**
@@ -60,4 +60,25 @@ sealed interface ResolveResult {
 
     /** No file was committed (precondition failed / request invalid). */
     data class Failure(val reason: SyncErrorKind) : ResolveResult
+
+    /**
+     * Bug fix (bug_report_20260503_p16x / BUG-003): the resolve commit
+     * landed locally but the subsequent push hit
+     * [com.example.simplygit.data.ssh.SshHostKeyFirstConnectException]
+     * (SPEC §6.2 single white-listed bypass). The UI must surface a TOFU
+     * confirmation dialog so the user can accept / cancel the fingerprint,
+     * then retry the push. Previous code swallowed this into `pushOk = false`
+     * and the user could not recover from the conflict screen.
+     *
+     * @property committedFiles how many files were already committed before
+     *   the push attempt (same semantics as [Success.committedFiles]).
+     * @property remainingSkipped unresolved SKIP-ed conflicts that will keep
+     *   `syncState == PAUSED_CONFLICT` until the user revisits them.
+     */
+    data class NeedsHostKeyConfirmation(
+        val host: String,
+        val fingerprint: String,
+        val committedFiles: Int,
+        val remainingSkipped: Int,
+    ) : ResolveResult
 }

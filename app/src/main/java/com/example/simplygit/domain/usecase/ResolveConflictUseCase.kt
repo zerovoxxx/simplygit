@@ -138,20 +138,59 @@ class ResolveConflictUseCase @Inject constructor(
         }
 
         // (5) Push.
+        //
+        // BUG-003 fix (bug_report_20260503_p16x): `gitRepository.push` never
+        // throws — it folds failures into `GitOpResult.Failure(cause)` and
+        // `JGitExceptionSanitizer.mapException` keeps
+        // `SshHostKeyFirstConnectException` intact as the single white-listed
+        // bypass (SPEC §6.2). The previous implementation collapsed the
+        // outcome into a boolean and dropped the TOFU cause, so a
+        // first-connect SSH push after a conflict resolve would leave the
+        // user with "push failed" and no path to accept the host key. We now
+        // peek at the cause and short-circuit to
+        // [ResolveResult.NeedsHostKeyConfirmation] so the UI can surface a
+        // TOFU dialog and retry the push.
         var pat: CharArray? = null
-        val pushOk: Boolean = try {
+        val pushResult: GitOpResult? = try {
             pat = credentialRepository.loadPatOnce() ?: CharArray(0)
-            val result = gitRepository.push(binding, identity.username, pat)
-            result is GitOpResult.Success
+            gitRepository.push(binding, identity.username, pat)
         } catch (e: Throwable) {
             diagnosticsLogger.logInfo(
                 tag = "conflict_push_failed",
                 message = "type=${e.javaClass.simpleName}",
             )
-            false
+            null
         } finally {
             pat?.let { Arrays.fill(it, '\u0000') }
         }
+
+        val tofu = (pushResult as? GitOpResult.Failure)?.cause as?
+            com.example.simplygit.data.ssh.SshHostKeyFirstConnectException
+        if (tofu != null) {
+            // Do NOT finalise the audit row as failure here — the user will
+            // come back through the TOFU dialog and we will re-enter the
+            // push path. Leaving the log row open is fine: the next
+            // RunSyncUseCase / ClearConflictPauseUseCase call will close it,
+            // and `pruneExpired` bounds the open-row backlog.
+            syncLogRepository.finishLog(
+                logId = logId,
+                result = SyncResult.NETWORK_ERR,
+                endedAt = Instant.now(clock),
+                errorMsg = "tofu:${tofu.host}",
+            )
+            diagnosticsLogger.logInfo(
+                "conflict_push_tofu",
+                "host=${tofu.host} committed=$committedFiles skipped=$skipCount",
+            )
+            return ResolveResult.NeedsHostKeyConfirmation(
+                host = tofu.host,
+                fingerprint = tofu.fingerprint,
+                committedFiles = committedFiles,
+                remainingSkipped = skipCount,
+            )
+        }
+
+        val pushOk = pushResult is GitOpResult.Success
 
         // (6) State wrap-up — truth table.
         val endedAt = Instant.now(clock)

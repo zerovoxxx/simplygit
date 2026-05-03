@@ -594,37 +594,48 @@ private fun AuthModeSection(
             selected = bound.authType == "SSH",
             label = stringResource(R.string.auth_type_ssh),
             onClick = {
+                // BUG-005 fix (bug_report_20260503_p16x): when the key list is
+                // empty we must not stay on PAT silently — that leaves the
+                // user clicking a radio that does nothing, and the "去创建
+                // SSH 密钥" hint below is gated on `authType == "SSH"` so it
+                // never appears either. Route directly to the SSH-key screen
+                // so the empty state has a visible way forward.
                 val firstKey = sshKeys.firstOrNull()
                 if (firstKey != null) {
                     onSubmitAuth("SSH", firstKey.keyId)
+                } else {
+                    onOpenSshKeys()
                 }
             },
         )
     }
-    if (bound.authType == "SSH") {
-        if (sshKeys.isEmpty()) {
-            OutlinedButton(onClick = onOpenSshKeys) {
-                Text(stringResource(R.string.ssh_key_select_none))
-            }
-        } else {
-            Text(
-                stringResource(R.string.ssh_key_select_label),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                sshKeys.forEach { key ->
-                    val currentRef = bound.authRef
-                    val selected = currentRef == key.keyId
-                    AuthModeRadio(
-                        selected = selected,
-                        label = stringResource(
-                            R.string.ssh_key_select_option,
-                            key.keyId,
-                            key.fingerprintSha256,
-                        ),
-                        onClick = { onSubmitAuth("SSH", key.keyId) },
-                    )
-                }
+    // BUG-005 fix: the "no keys yet" hint is now shown whenever the list is
+    // empty, regardless of which radio is currently selected — otherwise the
+    // user could not discover the SSH-key screen from Home without knowing
+    // the settings → SSH Keys path.
+    if (sshKeys.isEmpty()) {
+        OutlinedButton(onClick = onOpenSshKeys) {
+            Text(stringResource(R.string.ssh_key_select_none))
+        }
+    }
+    if (bound.authType == "SSH" && sshKeys.isNotEmpty()) {
+        Text(
+            stringResource(R.string.ssh_key_select_label),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            sshKeys.forEach { key ->
+                val currentRef = bound.authRef
+                val selected = currentRef == key.keyId
+                AuthModeRadio(
+                    selected = selected,
+                    label = stringResource(
+                        R.string.ssh_key_select_option,
+                        key.keyId,
+                        key.fingerprintSha256,
+                    ),
+                    onClick = { onSubmitAuth("SSH", key.keyId) },
+                )
             }
         }
     }

@@ -73,22 +73,35 @@ internal class FileTreeRepositoryImpl @Inject constructor(
         }
 
         // (1) Collect path → own status from JGit inside one `Git.open().use{}`.
+        //
+        // BUG-002 fix (bug_report_20260503_p16x): JGit's Status buckets are NOT
+        // mutually exclusive — `added/changed/removed` (HEAD↔index) and
+        // `modified/missing` (index↔worktree) are independent comparison
+        // layers, so a path may sit in both at once ("added + modified" when
+        // a file was `git add`-ed then edited again; "added + missing" when
+        // a staged file was deleted on disk). The previous implementation
+        // used plain `put` in ascending-priority order, but STAGED (prio 2)
+        // was written AFTER MODIFIED (prio 3) / DELETED (prio 4) which meant
+        // the unconditional overwrite silently demoted high-priority states
+        // down to STAGED. We now route every write through `higherPriority`
+        // so the final value is independent of iteration order.
         val statusByPath: Map<String, GitFileStatus> = runCatching {
             Git.open(root).use { git ->
                 val status = git.status().call()
                 buildMap {
-                    // Priority-ordered writes: later entries override earlier ones,
-                    // so write lower priority first then escalate.
-                    status.untracked.forEach { put(it, GitFileStatus.UNTRACKED) }
-                    status.modified.forEach { put(it, GitFileStatus.MODIFIED) }
+                    fun upsert(path: String, candidate: GitFileStatus) {
+                        this[path] = higherPriority(this[path], candidate)
+                    }
+                    status.untracked.forEach { upsert(it, GitFileStatus.UNTRACKED) }
+                    status.added.forEach { upsert(it, GitFileStatus.STAGED) }
+                    status.changed.forEach { upsert(it, GitFileStatus.STAGED) }
+                    status.removed.forEach { upsert(it, GitFileStatus.STAGED) }
+                    status.modified.forEach { upsert(it, GitFileStatus.MODIFIED) }
                     // JGit's `missing` means "tracked file gone from working
                     // tree but not yet `git rm`-ed" — surface it as DELETED so
                     // the browser row can distinguish "edited" from "removed".
-                    status.missing.forEach { put(it, GitFileStatus.DELETED) }
-                    status.added.forEach { put(it, GitFileStatus.STAGED) }
-                    status.changed.forEach { put(it, GitFileStatus.STAGED) }
-                    status.removed.forEach { put(it, GitFileStatus.STAGED) }
-                    status.conflicting.forEach { put(it, GitFileStatus.CONFLICT) }
+                    status.missing.forEach { upsert(it, GitFileStatus.DELETED) }
+                    status.conflicting.forEach { upsert(it, GitFileStatus.CONFLICT) }
                 }
             }
         }.getOrDefault(emptyMap())

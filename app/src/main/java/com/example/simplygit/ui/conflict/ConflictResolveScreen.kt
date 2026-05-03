@@ -160,16 +160,50 @@ fun ConflictResolveScreen(
     }
 
     uiState.result?.let { result ->
-        ResultDialog(
-            result = result,
-            onDismiss = {
-                viewModel.dismissResult()
-                if (result is SubmissionResult.Succeeded && result.remainingSkipped == 0 && result.pushOk) {
-                    onBack()
-                }
-            },
-            onRetry = { viewModel.submit() },
-        )
+        if (result is SubmissionResult.HostKeyNeeded) {
+            // BUG-003 fix (bug_report_20260503_p16x): dedicated TOFU modal so
+            // the user can accept / decline the fingerprint surfaced by the
+            // post-resolve push. Accepting retries the push via the
+            // ViewModel; declining keeps the committed state visible (the
+            // banner stays at PAUSED_CONFLICT until the next sync).
+            AlertDialog(
+                onDismissRequest = { viewModel.dismissResult() },
+                title = { Text(stringResource(R.string.tofu_confirm_title)) },
+                text = {
+                    Text(
+                        stringResource(
+                            R.string.tofu_confirm_body,
+                            result.host,
+                            result.fingerprint,
+                        ),
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        viewModel.confirmHostKey(result.host, result.fingerprint)
+                    }) { Text(stringResource(R.string.tofu_confirm_positive)) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.dismissResult() }) {
+                        Text(stringResource(R.string.tofu_confirm_negative))
+                    }
+                },
+            )
+        } else {
+            ResultDialog(
+                result = result,
+                onDismiss = {
+                    viewModel.dismissResult()
+                    if (result is SubmissionResult.Succeeded &&
+                        result.remainingSkipped == 0 &&
+                        result.pushOk
+                    ) {
+                        onBack()
+                    }
+                },
+                onRetry = { viewModel.submit() },
+            )
+        }
     }
 }
 
@@ -292,6 +326,21 @@ private fun ResultDialog(
             stringResource(R.string.conflict_result_failed_title),
             stringResource(R.string.conflict_result_failed_body),
             false,
+        )
+        // BUG-003 fix: the outer caller in [ConflictResolveScreen] already
+        // intercepts HostKeyNeeded and renders a dedicated TOFU dialog, so
+        // reaching this branch inside [ResultDialog] would be a programming
+        // error. We still keep the `when` exhaustive to satisfy the compiler
+        // and guard against future refactors: if someone removes the outer
+        // interception, we degrade gracefully to the "push failed" copy
+        // rather than crash.
+        is SubmissionResult.HostKeyNeeded -> Triple(
+            stringResource(R.string.conflict_result_success_title),
+            stringResource(
+                R.string.conflict_result_push_failed,
+                result.committedFiles,
+            ),
+            true,
         )
     }
     AlertDialog(

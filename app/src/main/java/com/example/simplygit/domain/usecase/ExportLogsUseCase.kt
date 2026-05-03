@@ -16,6 +16,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.time.Clock
+import java.time.Duration
 import java.util.Date
 import java.util.Locale
 import java.util.zip.ZipEntry
@@ -61,12 +62,35 @@ class ExportLogsUseCase @Inject constructor(
             }
         }
 
+        // BUG-006 fix (bug_report_20260503_p16x): prune historical exports so
+        // the directory does not accumulate forever. Each zip still contains
+        // already-sanitized content but is business audit data nonetheless —
+        // keeping it around widens the forensic / mis-backup attack surface
+        // without benefit. Kept in lock-step with DiagnosticsLogger's 7-day
+        // retention so a full export bundle always fits the same window.
+        pruneOldExports(dir, keepFile = zipFile)
+
         val uri = FileProvider.getUriForFile(
             context,
             "${context.packageName}.fileprovider",
             zipFile,
         )
         ExportArtifact(uri = uri, displayPath = zipFile.absolutePath)
+    }
+
+    /**
+     * Removes `simplygit-*.zip` files older than [EXPORT_RETENTION_DAYS]
+     * (measured by `File.lastModified`). The freshly written [keepFile] is
+     * explicitly excluded so a badly-skewed clock cannot delete the artefact
+     * we are about to return.
+     */
+    private fun pruneOldExports(dir: File, keepFile: File) {
+        val cutoff = clock.millis() - Duration.ofDays(EXPORT_RETENTION_DAYS.toLong()).toMillis()
+        dir.listFiles { f ->
+            f.name.startsWith("simplygit-") && f.name.endsWith(".zip")
+        }
+            ?.filter { it.absolutePath != keepFile.absolutePath && it.lastModified() < cutoff }
+            ?.forEach { runCatching { it.delete() } }
     }
 
     private fun List<SyncLogModel>.toJsonBytes(): ByteArray {
@@ -93,6 +117,7 @@ class ExportLogsUseCase @Inject constructor(
     private companion object {
         const val EXPORTS_DIR = "exports"
         const val MAX_EXPORT_ROWS = 500
+        const val EXPORT_RETENTION_DAYS = 7
         const val JSON_INDENT = 2
         val TS_FMT: SimpleDateFormat = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US)
     }
