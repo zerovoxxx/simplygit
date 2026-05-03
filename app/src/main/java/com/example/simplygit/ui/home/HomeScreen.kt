@@ -80,6 +80,7 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val boundSnapshot by viewModel.boundSnapshot.collectAsState()
     val safState by viewModel.safState.collectAsState()
     val credView by viewModel.credentialView.collectAsState()
     val sshKeys by viewModel.sshKeys.collectAsState()
@@ -98,7 +99,13 @@ fun HomeScreen(
         }
     }
 
-    val bound = uiState as? HomeUiState.Bound
+    // BUG fix (bug_report_20260503_clone_clears_fields):
+    // 绑定字段的只读展示**必须**用 `boundSnapshot`（始终跟随 binding/credential
+    // 刷新），而不是 `uiState as? HomeUiState.Bound`。后者在 Working / Error
+    // 状态下会退化为 `null`，导致 RemoteSection 内部 `remember(currentUrl)`
+    // 的 key 从真实 URL 变成 `null`，把用户刚刚填好的远程地址清空；Vault 路径
+    // 同样会显示成 "未绑定"。
+    val bound = boundSnapshot
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -479,18 +486,39 @@ private fun OperationsSection(
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
     )
+    // 4 个按钮等宽分摊行宽，避免窄屏（或"Commit"文案较长时）把最后的
+    // "Push" 按钮挤成两行。Button 默认的 contentPadding 在 weight(1f)
+    // 下会让较短文案（Clone / Pull / Push）自动居中，较长文案
+    // （Commit / Commit 信息）仍能单行显示。
     Row(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Button(enabled = enabled, onClick = onClone) { Text(stringResource(R.string.action_clone)) }
-        Button(enabled = enabled, onClick = onPull) { Text(stringResource(R.string.action_pull)) }
+        Button(
+            enabled = enabled,
+            onClick = onClone,
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 10.dp),
+            modifier = Modifier.weight(1f),
+        ) { Text(stringResource(R.string.action_clone), maxLines = 1) }
+        Button(
+            enabled = enabled,
+            onClick = onPull,
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 10.dp),
+            modifier = Modifier.weight(1f),
+        ) { Text(stringResource(R.string.action_pull), maxLines = 1) }
         Button(
             enabled = enabled && msg.isNotBlank(),
             onClick = { onCommit(msg.trim()) },
-        ) { Text(stringResource(R.string.action_commit)) }
-        Button(enabled = enabled, onClick = onPush) { Text(stringResource(R.string.action_push)) }
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 10.dp),
+            modifier = Modifier.weight(1f),
+        ) { Text(stringResource(R.string.action_commit), maxLines = 1) }
+        Button(
+            enabled = enabled,
+            onClick = onPush,
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 10.dp),
+            modifier = Modifier.weight(1f),
+        ) { Text(stringResource(R.string.action_push), maxLines = 1) }
     }
 }
 

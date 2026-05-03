@@ -115,6 +115,23 @@ class HomeViewModel @Inject constructor(
     private val _uiState = MutableStateFlow<HomeUiState>(HomeUiState.Idle)
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
+    /**
+     * BUG fix (bug_report_20260503_clone_clears_fields): 绑定字段的"稳态快照"。
+     *
+     * [uiState] 会在 Clone/Pull/Commit/Push 期间切到 [HomeUiState.Working]，
+     * 或在失败时切到 [HomeUiState.Error]，这两种状态下 `HomeScreen` 里的
+     * `bound = uiState as? HomeUiState.Bound` 直接变成 `null`，导致 Vault /
+     * Remote / Credential 等只读展示区退化成"未绑定"的错觉，并且
+     * [RemoteSection] 的本地 `remember(currentUrl)` 会因为 key 从真实 URL
+     * 变成 `null` 而把用户输入的远程地址清空。
+     *
+     * 这里单独暴露一份始终反映 binding/credential/policy 的 `Bound` 快照，
+     * 即使正在执行 Git 操作或出错也持续刷新。UI 的展示区改为消费它，
+     * [OperationsSection] 的按钮 enable / Working 指示仍然看 [uiState]。
+     */
+    private val _boundSnapshot = MutableStateFlow<HomeUiState.Bound?>(null)
+    val boundSnapshot: StateFlow<HomeUiState.Bound?> = _boundSnapshot.asStateFlow()
+
     private val _safState = MutableStateFlow<SafResolveUiState>(SafResolveUiState.None)
     val safState: StateFlow<SafResolveUiState> = _safState.asStateFlow()
 
@@ -201,16 +218,15 @@ class HomeViewModel @Inject constructor(
                 migrationDisabled = migrationDisabled,
             )
         }.onEach { snapshot ->
-            val prev = _uiState.value
-            if (prev is HomeUiState.Working) return@onEach
-            val keepLast = (prev as? HomeUiState.Bound)?.lastSuccess
-            if (prev is HomeUiState.Error) return@onEach
-            _uiState.value = HomeUiState.Bound(
+            // BUG fix: `_boundSnapshot` 始终跟随最新的 binding/credential/policy 刷新，
+            // 不被 Working/Error 打断，供 UI 的只读展示区使用，避免"点击 Clone 后
+            // 远程 URL / Vault 路径被清空"的错觉。
+            val newBound = HomeUiState.Bound(
                 treeUri = snapshot.binding?.treeUri,
                 localAbsPath = snapshot.binding?.localAbsPath,
                 remoteUrl = snapshot.binding?.remoteUrl,
                 username = snapshot.cred?.username,
-                lastSuccess = keepLast,
+                lastSuccess = (_uiState.value as? HomeUiState.Bound)?.lastSuccess,
                 syncState = snapshot.syncState,
                 intervalMinutes = snapshot.intervalMinutes,
                 pendingAlertCount = snapshot.pendingCount,
@@ -220,6 +236,12 @@ class HomeViewModel @Inject constructor(
                 authType = snapshot.binding?.authType ?: "PAT",
                 authRef = snapshot.binding?.authRef ?: "github_pat",
             )
+            _boundSnapshot.value = newBound
+
+            val prev = _uiState.value
+            if (prev is HomeUiState.Working) return@onEach
+            if (prev is HomeUiState.Error) return@onEach
+            _uiState.value = newBound
         }.launchIn(viewModelScope)
     }
 

@@ -125,6 +125,10 @@
     <string name="policy_notification_warn_cta_grant">点此授权</string>
     <string name="policy_notification_warn_cta_settings">去系统设置</string>
     <string name="policy_section_security">安全与认证</string>
+    <string name="policy_section_about">关于</string>
+    <string name="about_app_name">SimplyGit</string>
+    <string name="about_version">版本 %1$s</string>
+    <string name="about_version_unknown">版本 未知</string>
 
     <!-- ========================================================= -->
     <!-- SPEC Iteration 2 — SyncAuditScreen (§4.7). -->

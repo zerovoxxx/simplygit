@@ -254,7 +254,47 @@ fun SyncPolicyScreen(
             ) {
                 Text(stringResource(R.string.action_open_ssh_keys))
             }
+
+            // 底部"关于"区块：展示应用名与版本号。版本号通过 PackageManager
+            // 在运行时读取，避免依赖 BuildConfig（buildFeatures.buildConfig
+            // 未在 app/build.gradle.kts 中启用）。
+            Spacer(Modifier.height(16.dp))
+            AboutSection()
         }
+    }
+}
+
+@Composable
+private fun AboutSection() {
+    val context = LocalContext.current
+    val versionName = remember(context) {
+        runCatching {
+            context.packageManager
+                .getPackageInfo(context.packageName, 0)
+                .versionName
+        }.getOrNull()
+    }
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            stringResource(R.string.policy_section_about),
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Text(
+            stringResource(R.string.about_app_name),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            text = if (versionName.isNullOrBlank()) {
+                stringResource(R.string.about_version_unknown)
+            } else {
+                stringResource(R.string.about_version, versionName)
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

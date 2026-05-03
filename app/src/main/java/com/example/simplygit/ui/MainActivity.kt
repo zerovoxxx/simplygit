@@ -2,7 +2,6 @@ package com.example.simplygit.ui
 
 import android.content.Intent
 import android.os.Bundle
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -33,8 +32,6 @@ import javax.inject.Inject
 /**
  * Host Activity (SPEC §4.5 Iteration 1 + §4.7 Iteration 2 + §5.1 Iteration 3).
  *
- *  - FLAG_SECURE covers the entire window so the PAT text field cannot be
- *    captured by screenshots / screen recording / recent-task thumbnails.
  *  - NavHost routes: `home` / `policy` / `audit` / `audit/{logId}` /
  *    `browser/{repoId}` / `diff/{repoId}/{encodedPath}?source=...` /
  *    `conflict/{repoId}` / `ssh_keys`.
@@ -44,6 +41,14 @@ import javax.inject.Inject
  *    [NotificationPublisherImpl.EXTRA_NAV] (`audit` / `resume` / `conflict`)
  *    plus an optional [NotificationPublisherImpl.EXTRA_REPO_ID] for the
  *    conflict-specific landing.
+ *
+ *  Screenshot policy: FLAG_SECURE 不再在整窗口级别强制启用 —— 此前的一刀切
+ *  会让用户连正常的笔记截图都无法完成。PAT 输入框本身使用
+ *  [androidx.compose.ui.text.input.PasswordVisualTransformation] 掩码，凭证
+ *  在落盘时也走 encrypted DataStore（SPEC §4.4）；Recent-task 缩略图里不会
+ *  出现 PAT 明文。如果后续需要在"正在输入 PAT"这种极短暂的窗口再启用
+ *  FLAG_SECURE，应在对应 Compose Screen 的 DisposableEffect 里局部
+ *  add/clear，而不是在 Activity 级别长期压住。
  */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -55,10 +60,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.setFlags(
-            WindowManager.LayoutParams.FLAG_SECURE,
-            WindowManager.LayoutParams.FLAG_SECURE,
-        )
         enableEdgeToEdge()
         pendingNav = intent?.getStringExtra(NotificationPublisherImpl.EXTRA_NAV)
         pendingNavRepoId = intent?.takeIf {
