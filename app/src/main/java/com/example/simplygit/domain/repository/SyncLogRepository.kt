@@ -35,6 +35,26 @@ interface SyncLogRepository {
      */
     suspend fun tryStartRun(repoId: Long, trigger: SyncTrigger, now: Instant): Long?
 
+    /**
+     * Aborts stale worker-owned open log rows and releases a stranded RUNNING
+     * state when no live worker log remains. This is the recovery path for
+     * process death / WorkManager stop between [tryStartRun] and normal finish.
+     */
+    suspend fun recoverStaleRunning(repoId: Long, staleBefore: Instant, endedAt: Instant): Boolean
+
+    /**
+     * Aborts the currently claimed worker run in one transaction. Used from
+     * cancellation cleanup so `sync_log.endedAt` and repository `syncState`
+     * cannot drift when WorkManager stops a coroutine.
+     */
+    suspend fun abortRun(
+        repoId: Long,
+        logId: Long,
+        endedAt: Instant,
+        errorMsg: String? = null,
+        errorType: String? = null,
+    )
+
     suspend fun finishLog(
         logId: Long,
         result: SyncResult,

@@ -22,6 +22,9 @@ import com.example.simplygit.domain.repository.SyncLogRepository
 import com.example.simplygit.domain.repository.SyncPolicyRepository
 import com.example.simplygit.domain.service.DebounceGuard
 import com.example.simplygit.domain.service.NotificationPublisher
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -72,6 +75,12 @@ class RunSyncUseCase @Inject constructor(
     suspend operator fun invoke(trigger: SyncTrigger): RunSyncOutcome {
         val binding = bindingRepo.currentOrNull() ?: return RunSyncOutcome.NoBinding
         val repoId = binding.id
+        val now = Instant.now(clock)
+        syncLogRepo.recoverStaleRunning(
+            repoId = repoId,
+            staleBefore = now.minus(RUNNING_STALE_TIMEOUT),
+            endedAt = now,
+        )
         val snapshot = syncLogRepo.loadRepoState(repoId)
 
         // (1) Pause / in-flight gate.
@@ -82,7 +91,6 @@ class RunSyncUseCase @Inject constructor(
             return RunSyncOutcome.SkippedRunning
         }
 
-        val now = Instant.now(clock)
         val logId = syncLogRepo.tryStartRun(repoId, trigger, now) ?: run {
             val latest = syncLogRepo.loadRepoState(repoId).syncState
             return if (latest in PAUSED_STATES) {
@@ -209,8 +217,21 @@ class RunSyncUseCase @Inject constructor(
         } catch (e: SanitizedGitException) {
             diagnostics.logGitOpFailure("SYNC", e)
             handleSanitized(repoId, logId, e)
+        } catch (e: CancellationException) {
+            withContext(NonCancellable) {
+                runCatching {
+                    syncLogRepo.abortRun(
+                        repoId = repoId,
+                        logId = logId,
+                        endedAt = Instant.now(clock),
+                        errorMsg = "worker cancelled",
+                        errorType = e.javaClass.simpleName,
+                    )
+                }
+            }
+            throw e
         } catch (e: Throwable) {
-            // Defensive: anything not already sanitized (e.g. OOM, cancellation)
+            // Defensive: anything not already sanitized (e.g. OOM / local IO)
             // still goes through the sanitizer so errorMsg never leaks raw text.
             val sanitized = jgitExceptionSanitizer.sanitize(e)
             diagnostics.logGitOpFailure("SYNC", sanitized)
@@ -291,7 +312,7 @@ class RunSyncUseCase @Inject constructor(
         when (binding.authType) {
             "PAT" -> credRepo.loadPatOnce()
             "SSH" -> CharArray(0)
-            else -> throw IllegalStateException("unknown authType=${binding.authType}")
+            else -> error("unknown authType=${binding.authType}")
         }
 
     private fun buildCommitMessage(policy: SyncPolicyModel): String {
@@ -301,6 +322,7 @@ class RunSyncUseCase @Inject constructor(
 
     companion object {
         val QUIET_WINDOW: Duration = Duration.ofMinutes(2)
+        val RUNNING_STALE_TIMEOUT: Duration = Duration.ofMinutes(30)
         const val BROKEN_STREAK_THRESHOLD: Int = 3
         val ISO_FMT: DateTimeFormatter =
             DateTimeFormatter.ISO_INSTANT.withZone(ZoneOffset.UTC)

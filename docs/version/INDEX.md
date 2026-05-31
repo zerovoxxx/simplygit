@@ -30,3 +30,4 @@
 | 2026-05-03 | v2.5 | AI | fix(app)：首页 Clone 时绑定只读区清空（HomeVM boundSnapshot）+ 关于版块 + FLAG_SECURE 解除 + Push 按钮换行修复，发布 v1.0.3（6 文件 +115/-20）。 |
 | 2026-05-03 | v2.6 | AI | fix(app)：修复同步审计统计恒为 0（8 文件 +152/-34），commitAll/push 返回 DTO 带真实 filesChanged/commitsPushed，发布 v1.0.4；新增反模式 P14。 |
 | 2026-05-31 | v2.7 | AI | fix(sync)：补齐默认自动同步策略的 WorkManager 入队路径，避免未进策略页保存时压后台后周期同步不运行；详见 `docs/bugreport/20260531/bug_report_20260531_background_auto_sync.md`。 |
+| 2026-05-31 | v2.8 | AI | fix(sync)：为后台 `RUNNING` 增加 stale recovery 与取消收口，避免补偿/周期 Worker 被系统中断后永久卡在"进行中"；详见 `docs/bugreport/20260531/bug_report_20260531_background_auto_sync.md`。 |

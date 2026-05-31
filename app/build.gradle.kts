@@ -36,7 +36,9 @@ android {
         abi {
             isEnable = true
             reset()
-            include("arm64-v8a")
+            // Keep arm64 for release devices, and include x86_64 so Android
+            // Studio can install debug builds on the bundled emulator images.
+            include("arm64-v8a", "x86_64")
             isUniversalApk = false
         }
     }
@@ -169,6 +171,8 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.androidx.test.core)
+    testImplementation(libs.robolectric)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))

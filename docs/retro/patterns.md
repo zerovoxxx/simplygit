@@ -30,6 +30,8 @@
 
 - **P14. 审计/遥测统计字段在 UseCase 边界处被"压扁为常量"**：Domain 层 UseCase 把底层操作的成功结果折叠成 `GitOpResult.Success`（空 payload）而不是 `SuccessWithPayload(DTO)`，然后消费端（ViewModel）在"写入审计行"时只能用 `if (op == PUSH) 1 else 0` / `filesChanged = 0` 这类**常量假设**补足统计字段。编译通过、lint 通过、功能链路也"成功"——但审计表里每一行的 `pulled/pushed/files` 永远是 `0`，用户在审计页完全看不到自己这次操作的真实变更量。反向追溯非常困难，因为 DTO 链路没断，是"没人调用"。典型：`GitRepositoryImpl.commitAll / push` 只返回 `Success`，`HomeViewModel.finishManualLogSuccess` 把 `filesChanged` 写死为 0 / `commitsPushed` 写死为 1；而 `RunSyncUseCase` 走的是另一条 `commitAllIfDirty` + `CommitOutcome` 正确分支——两条路径对同一审计列写入的口径完全不同。（来源：bug_report_20260503 "同步审计数字恒为 0"）。✅ 应改为：①凡是最终落库/上报/展示的统计字段，Data 层必须用**带 payload 的结果类型**返回（`CommitOutcome.filesChanged` / `PushOutcome.commitsPushed` 等 DTO），不允许消费端 `if (op == X) 常量 else 0` 推测；②新增需要统计的字段时，优先扩展现有 DTO 而不是新建第二条 "fast path"（Iteration 2 引入 `commitAllIfDirty` 时，Iteration 1 的 `commitAll` 应同步补齐统计而非孤立演进）；③CR 阶段对每个 `syncLogRepo.finishLog(...)` / 等价遥测入口，核对每个统计参数都来自上游 payload 而非 `if/else 常量`；④可选加一条 detekt 规则：命中 `\.finishLog\(.*filesChanged = 0.*\)` 且 function body 未出现 `payload as?` 时告警。
 
+- **P15. 持久化中间态没有租约**：把 `RUNNING` / `PROCESSING` / `IN_PROGRESS` 这类中间态持久化到数据库后，只在正常 happy path 里恢复到终态；一旦进程死亡、Worker 被 stop、协程取消或系统杀后台，下一次启动看到中间态就直接 skip，导致功能永久卡死，审计行也永久 `endedAt = null`。典型：`RunSyncUseCase.tryStartRun()` 已把仓库置为 `RUNNING`，但下一次 Worker 对 `SyncState.RUNNING` 直接 `SkippedRunning`，没有 stale recovery。（来源：BUG-20260531-B）。✅ 应改为：①中间态写入时必须定义租约/过期阈值；②启动入口先执行 stale recovery；③取消路径用 `NonCancellable` 做最小收口并重抛 `CancellationException`；④恢复孤儿审计行时避免覆盖较新的 `lastSyncAt / lastSyncResult`。
+
 ## 流程类反模式
 
 （待积累）

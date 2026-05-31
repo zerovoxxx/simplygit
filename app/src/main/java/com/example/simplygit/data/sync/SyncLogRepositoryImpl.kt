@@ -76,6 +76,76 @@ class SyncLogRepositoryImpl @Inject constructor(
             )
         }
 
+    override suspend fun recoverStaleRunning(
+        repoId: Long,
+        staleBefore: Instant,
+        endedAt: Instant,
+    ): Boolean = db.withTransaction {
+        val endedAtMillis = endedAt.toEpochMilli()
+        var recovered = false
+        val state = repoDao.findById(repoId)?.syncState
+        val staleRows = logDao.staleOpenWorkerRuns(
+            repoId = repoId,
+            staleBeforeMillis = staleBefore.toEpochMilli(),
+        )
+        staleRows.forEach { row ->
+            logDao.update(
+                row.copy(
+                    endedAt = endedAtMillis,
+                    result = SyncResult.ABORTED.name,
+                    errorMsg = row.errorMsg ?: STALE_RUNNING_ERROR_MSG,
+                    errorType = row.errorType ?: STALE_RUNNING_ERROR_TYPE,
+                ),
+            )
+            recovered = true
+        }
+
+        val openWorkerRuns = logDao.openWorkerRunCount(repoId)
+        if (state == SyncState.RUNNING.name && openWorkerRuns == 0) {
+            if (staleRows.isNotEmpty()) {
+                repoDao.updateLastSync(repoId, endedAtMillis, SyncResult.ABORTED.name)
+            }
+            repoDao.compareAndSetSyncState(
+                id = repoId,
+                expectedState = SyncState.RUNNING.name,
+                nextState = SyncState.IDLE.name,
+            )
+            recovered = true
+        }
+        recovered
+    }
+
+    override suspend fun abortRun(
+        repoId: Long,
+        logId: Long,
+        endedAt: Instant,
+        errorMsg: String?,
+        errorType: String?,
+    ) {
+        db.withTransaction {
+            val endedAtMillis = endedAt.toEpochMilli()
+            val row = logDao.findById(logId)
+            if (row != null) {
+                logDao.update(
+                    row.copy(
+                        endedAt = endedAtMillis,
+                        result = SyncResult.ABORTED.name,
+                        errorMsg = errorMsg,
+                        errorType = errorType,
+                    ),
+                )
+                repoDao.updateLastSync(row.repoId, endedAtMillis, SyncResult.ABORTED.name)
+            }
+            if (logDao.openWorkerRunCount(repoId) == 0) {
+                repoDao.compareAndSetSyncState(
+                    id = repoId,
+                    expectedState = SyncState.RUNNING.name,
+                    nextState = SyncState.IDLE.name,
+                )
+            }
+        }
+    }
+
     override suspend fun finishLog(
         logId: Long,
         result: SyncResult,
@@ -156,6 +226,8 @@ class SyncLogRepositoryImpl @Inject constructor(
         logDao.recentAll(limit).map { it.toModel() }
 
     private companion object {
+        const val STALE_RUNNING_ERROR_MSG = "stale worker run exceeded running lease"
+        const val STALE_RUNNING_ERROR_TYPE = "StaleRunningRun"
         const val FAILURE_SCAN_LIMIT = 10
         const val RETENTION_DAYS = 7
         const val MAX_ROWS = 500

@@ -1,3 +1,5 @@
+@file:Suppress("TooManyFunctions")
+
 package com.example.simplygit.data.sync
 
 import androidx.room.Dao
@@ -25,6 +27,28 @@ interface SyncLogDao {
 
     @Query("SELECT * FROM sync_log WHERE id = :id")
     suspend fun findById(id: Long): SyncLogEntity?
+
+    @Query(
+        """
+        SELECT * FROM sync_log
+        WHERE repoId = :repoId
+          AND endedAt IS NULL
+          AND trigger IN ('PERIODIC', 'CATCHUP')
+          AND startedAt <= :staleBeforeMillis
+        ORDER BY startedAt ASC
+        """
+    )
+    suspend fun staleOpenWorkerRuns(repoId: Long, staleBeforeMillis: Long): List<SyncLogEntity>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM sync_log
+        WHERE repoId = :repoId
+          AND endedAt IS NULL
+          AND trigger IN ('PERIODIC', 'CATCHUP')
+        """
+    )
+    suspend fun openWorkerRunCount(repoId: Long): Int
 
     @Query(
         """
