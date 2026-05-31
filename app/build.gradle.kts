@@ -26,8 +26,8 @@ android {
         applicationId = "com.example.simplygit"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "v1.0.4"
+        versionCode = 6
+        versionName = "1.0.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

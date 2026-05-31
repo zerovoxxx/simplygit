@@ -5,8 +5,6 @@
 .gradle/
 .kotlin/
 local.properties
-key.properties
-/keystore/
 /captures
 .externalNativeBuild
 .cxx
