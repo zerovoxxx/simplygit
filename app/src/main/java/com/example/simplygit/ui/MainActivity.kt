@@ -14,6 +14,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.example.simplygit.domain.usecase.EnsureAutoSyncScheduledUseCase
 import com.example.simplygit.notification.NotificationPublisherImpl
 import com.example.simplygit.runtime.CatchUpTrigger
 import com.example.simplygit.ui.audit.SyncAuditDetailScreen
@@ -35,8 +36,8 @@ import javax.inject.Inject
  *  - NavHost routes: `home` / `policy` / `audit` / `audit/{logId}` /
  *    `browser/{repoId}` / `diff/{repoId}/{encodedPath}?source=...` /
  *    `conflict/{repoId}` / `ssh_keys`.
- *  - Cold-start catch-up sync is triggered asynchronously so it never blocks
- *    the first Home frame (SPEC NF1 / G8).
+ *  - Cold-start rehydrates the periodic WorkManager request, then triggers
+ *    catch-up asynchronously so it never blocks the first Home frame.
  *  - Notification deep links reach us via `onNewIntent` carrying
  *    [NotificationPublisherImpl.EXTRA_NAV] (`audit` / `resume` / `conflict`)
  *    plus an optional [NotificationPublisherImpl.EXTRA_REPO_ID] for the
@@ -54,6 +55,7 @@ import javax.inject.Inject
 class MainActivity : ComponentActivity() {
 
     @Inject lateinit var catchUpTrigger: CatchUpTrigger
+    @Inject lateinit var ensureAutoSyncScheduled: EnsureAutoSyncScheduledUseCase
 
     private var pendingNav by mutableStateOf<String?>(null)
     private var pendingNavRepoId by mutableStateOf<Long?>(null)
@@ -66,7 +68,10 @@ class MainActivity : ComponentActivity() {
             it.hasExtra(NotificationPublisherImpl.EXTRA_REPO_ID)
         }?.getLongExtra(NotificationPublisherImpl.EXTRA_REPO_ID, 0L)
 
-        lifecycleScope.launch { runCatching { catchUpTrigger.triggerIfStale() } }
+        lifecycleScope.launch {
+            runCatching { ensureAutoSyncScheduled() }
+            runCatching { catchUpTrigger.triggerIfStale() }
+        }
 
         setContent {
             SimplygitTheme {

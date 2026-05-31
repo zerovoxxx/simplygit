@@ -13,6 +13,7 @@ import javax.inject.Inject
  */
 class SaveAuthTypeUseCase @Inject constructor(
     private val bindingRepo: RepoBindingRepository,
+    private val ensureAutoSyncScheduled: EnsureAutoSyncScheduledUseCase,
 ) {
     /**
      * @param authType `"PAT"` or `"SSH"`.
@@ -20,5 +21,6 @@ class SaveAuthTypeUseCase @Inject constructor(
      */
     suspend operator fun invoke(authType: String, authRef: String) {
         bindingRepo.saveAuth(authType, authRef)
+        ensureAutoSyncScheduled()
     }
 }

@@ -32,6 +32,7 @@ import com.example.simplygit.domain.usecase.BindVaultOutcome
 import com.example.simplygit.domain.usecase.BindVaultUseCase
 import com.example.simplygit.domain.usecase.CloneRepoUseCase
 import com.example.simplygit.domain.usecase.CommitLocalUseCase
+import com.example.simplygit.domain.usecase.EnsureAutoSyncScheduledUseCase
 import com.example.simplygit.domain.usecase.MissingBindingException
 import com.example.simplygit.domain.usecase.MissingCredentialException
 import com.example.simplygit.domain.usecase.PullRepoUseCase
@@ -109,6 +110,7 @@ class HomeViewModel @Inject constructor(
     private val pushRepo: PushRepoUseCase,
     private val resumeSync: ResumeFromPauseUseCase,
     private val saveAuthType: SaveAuthTypeUseCase,
+    private val ensureAutoSyncScheduled: EnsureAutoSyncScheduledUseCase,
     private val jgitExceptionSanitizer: JGitExceptionSanitizer,
 ) : ViewModel() {
 
@@ -371,10 +373,12 @@ class HomeViewModel @Inject constructor(
             _uiState.value = when (result) {
                 GitOpResult.Success -> {
                     finishManualLogSuccess(manualLogId, op, payload = null)
+                    runCatching { ensureAutoSyncScheduled() }
                     snapshotBound(LastOpSummary(op, successDesc(op, null)))
                 }
                 is GitOpResult.SuccessWithPayload -> {
                     finishManualLogSuccess(manualLogId, op, payload = result.payload)
+                    runCatching { ensureAutoSyncScheduled() }
                     snapshotBound(LastOpSummary(op, successDesc(op, result.payload)))
                 }
                 is GitOpResult.Failure -> {
